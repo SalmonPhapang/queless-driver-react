@@ -1,0 +1,13 @@
+.bank-details-form {
+  max-width: 440px;
+  margin: 0 auto;
+}
+
+.bank-details-form__actions {
+  display: flex;
+  gap: 12px;
+}
+
+.bank-details-form__actions .btn:last-child {
+  flex: 1;
+}
