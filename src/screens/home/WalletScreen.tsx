@@ -215,6 +215,10 @@ export const WalletScreen = () => {
                 <div className="wallet-hero__caption">Settlement Summary</div>
                 <div className="wallet-hero__amount">{formatCurrency(totalEarned)}</div>
                 <div className="wallet-hero__caption">Total earned</div>
+                <p className="text-muted text-xs mt-8">
+                  Earnings appear when an order is delivered. Payouts run every Tuesday and
+                  Thursday; banks can take up to 1 business day to reflect the transfer.
+                </p>
                 <div className="wallet-hero__divider" />
                 <div className="wallet-hero__stats">
                   <div className="wallet-stat">
@@ -275,7 +279,7 @@ export const WalletScreen = () => {
                 <p className="text-muted mt-8" style={{ fontStyle: 'italic' }}>
                   No bank details configured.
                 </p>
-                <p className="text-muted text-xs">Add your bank details to enable payment splitting.</p>
+                <p className="text-muted text-xs">Add your bank details to receive Tuesday and Thursday payouts.</p>
               </div>
             )}
 

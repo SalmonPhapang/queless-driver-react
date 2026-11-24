@@ -128,7 +128,11 @@ export const BankDetailsScreen = () => {
             </div>
           ) : (
             <div className="bank-details-form stack">
-              <p className="text-sm text-muted">Enter your South African bank details for payouts.</p>
+              <p className="text-sm text-muted">
+                Enter your South African bank details for payouts. We pay out every Tuesday and
+                Thursday; your bank may take up to 1 business day to reflect the transfer. Your
+                first payout may take longer while your bank details are verified.
+              </p>
 
               {loadError && (
                 <StatusMessage
