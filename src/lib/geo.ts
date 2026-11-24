@@ -1,20 +1,2 @@
-// Port of LocationService.calculateDistance (Haversine, km).
-
-const EARTH_RADIUS_KM = 6371;
-
-const degToRad = (deg: number): number => (deg * Math.PI) / 180;
-
-export const calculateDistance = (
-  lat1: number,
-  lon1: number,
-  lat2: number,
-  lon2: number,
-): number => {
-  const dLat = degToRad(lat2 - lat1);
-  const dLon = degToRad(lon2 - lon1);
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(degToRad(lat1)) * Math.cos(degToRad(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return EARTH_RADIUS_KM * c;
-};
+// Shared Haversine distance. Source of truth: @queless/core.
+export { calculateDistance, calculateDistanceKm } from '@queless/core/utils';

@@ -122,7 +122,7 @@ const TrackingTimeline = ({ order }: { order: DeliveryOrder }) => {
   return (
     <div className="timeline">
       {updates.map((raw, index) => {
-        const update = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+        const update = raw && typeof raw === 'object' ? (raw as unknown as Record<string, unknown>) : {};
         const status = update.status != null ? String(update.status).toUpperCase() : 'UPDATE';
         const message = update.message != null ? String(update.message) : '';
         const parsed = new Date(String(update.timestamp ?? ''));
@@ -553,7 +553,7 @@ export const OrderDetailsScreen = () => {
             {order.items != null && order.items.length > 0 ? (
               <div className="card" style={{ padding: 0 }}>
                 {order.items.map((raw, index) => {
-                  const item = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+                  const item = raw && typeof raw === 'object' ? (raw as unknown as Record<string, unknown>) : {};
                   const qty = Number(item.quantity ?? 1);
                   const unit = Number(item.base_price_per_unit ?? 0);
                   const imageUrl = item.product_image_url != null ? String(item.product_image_url) : '';
