@@ -52,9 +52,8 @@ const colourFor = (type: string): string => {
 };
 
 /** Flutter's inline `_timeLabel` (d/m/yyyy for anything older than a week). */
-const timeLabel = (createdAt: string | Date): string => {
-  const date = createdAt instanceof Date ? createdAt : new Date(createdAt);
-  const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
+const timeLabel = (createdAt: Date): string => {
+  const seconds = Math.floor((Date.now() - createdAt.getTime()) / 1000);
   if (seconds < 60) return 'Just now';
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) return `${minutes}m ago`;
@@ -62,7 +61,7 @@ const timeLabel = (createdAt: string | Date): string => {
   if (hours < 24) return `${hours}h ago`;
   const days = Math.floor(hours / 24);
   if (days < 7) return `${days}d ago`;
-  return `${date.getDate()}/${date.getMonth() + 1}/${date.getFullYear()}`;
+  return `${createdAt.getDate()}/${createdAt.getMonth() + 1}/${createdAt.getFullYear()}`;
 };
 
 /** Port of lib/screens/notifications/notification_inbox_screen.dart. */

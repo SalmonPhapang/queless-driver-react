@@ -10,7 +10,6 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@queless/core": "file:../queless-core-react",
     "@supabase/supabase-js": "^2.119.2",
     "lucide-react": "^1.79.0",
     "react": "^19.3.1",
