@@ -6,7 +6,7 @@ import { typography } from '../theme/typography';
 interface DeliveryEmptyStateProps {
   icon: React.ReactNode;
   title: string;
-  message: string;
+  message?: string | null;
   tips?: { icon: React.ReactNode; text: string }[];
   action?: React.ReactNode;
 }
@@ -22,7 +22,11 @@ export function DeliveryEmptyState({ icon, title, message, tips = [], action }: 
       <View style={styles.inner}>
         <View style={[styles.iconBubble, { backgroundColor: colors.primaryContainer }]}>{icon}</View>
         <Text style={[typography.titleLarge, styles.title, { color: colors.text }]}>{title}</Text>
-        <Text style={[typography.bodyMedium, styles.message, { color: colors.textMuted }]}>{message}</Text>
+        {message ? (
+          <Text style={[typography.bodyMedium, styles.message, { color: colors.textMuted }]}>
+            {message}
+          </Text>
+        ) : null}
 
         {tips.length > 0 && (
           <View style={styles.tips}>

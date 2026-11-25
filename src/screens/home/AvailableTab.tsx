@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
+import { Avatar } from '../../components/Avatar';
+import { Badge } from '../../components/Badge';
 import { Button } from '../../components/Button';
 import { DeliveryEmptyState } from '../../components/DeliveryEmptyState';
 import { OrderCard, OrderItemsRow, OrderRoute } from '../../components/OrderCard';
@@ -21,9 +23,32 @@ import { typography } from '../../theme/typography';
 
 type StatusVariant = 'error' | 'warning' | 'info' | 'success';
 
+const greetingForHour = (hour: number): string => {
+  if (hour < 12) return 'Good morning';
+  if (hour < 18) return 'Good afternoon';
+  return 'Good evening';
+};
+
+const firstNameOf = (fullName: string | null | undefined): string => {
+  const name = fullName?.trim() || 'Driver';
+  return name.split(/\s+/)[0] || 'Driver';
+};
+
 const styles = StyleSheet.create({
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   content: { flex: 1, paddingBottom: 16 },
+  greeting: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginHorizontal: 16,
+    marginTop: 8,
+    marginBottom: 16,
+  },
+  greetingText: { flex: 1 },
+  greetingTitle: { fontWeight: '800' },
+  greetingSubtitle: { marginTop: 3 },
+  greetingMeta: { alignItems: 'flex-end', gap: 6 },
   statusBlock: { marginBottom: 12 },
   banner: {
     flexDirection: 'row',
@@ -150,7 +175,37 @@ export const AvailableTab = () => {
   };
 
   const isVerified = driver?.isVerified ?? false;
+  const isOnline = driver?.driverStatus === 'online';
   const statusColor = OrderStatusX.color('ready_for_pickup');
+  const greetingName = firstNameOf(
+    driver?.fullName?.trim() || user?.email?.split('@')[0] || undefined,
+  );
+  const greetingTitle = `${greetingForHour(new Date().getHours())}, ${greetingName}`;
+
+  let greetingSubtitle: string;
+  let badgeLabel: string;
+  let badgeTone: 'green' | 'orange' | 'gray';
+  if (orders.length > 0) {
+    greetingSubtitle = 'Review the pickup details and accept before the offer expires.';
+    badgeLabel = `${orders.length} ${orders.length === 1 ? 'OFFER' : 'OFFERS'}`;
+    badgeTone = 'green';
+  } else if (!driver) {
+    greetingSubtitle = 'Checking your driver status...';
+    badgeLabel = 'CHECKING';
+    badgeTone = 'gray';
+  } else if (!isVerified) {
+    greetingSubtitle = 'Verification is pending. You can browse, but accepting stays locked.';
+    badgeLabel = 'PENDING';
+    badgeTone = 'orange';
+  } else if (isOnline) {
+    greetingSubtitle = "You're online. New pickup requests will appear here automatically.";
+    badgeLabel = 'READY';
+    badgeTone = 'green';
+  } else {
+    greetingSubtitle = 'Turn on availability in Profile to start receiving offers.';
+    badgeLabel = 'OFFLINE';
+    badgeTone = 'gray';
+  }
 
   if (loading) {
     return <DeliveryOrdersSkeleton variant="available" />;
@@ -159,6 +214,27 @@ export const AvailableTab = () => {
   return (
     <Screen padded={false} scroll={false}>
       <View style={styles.content}>
+        <View style={styles.greeting}>
+          <Avatar
+            name={driver?.fullName ?? user?.email ?? greetingName}
+            uri={driver?.imageUrl}
+            size={44}
+          />
+          <View style={styles.greetingText}>
+            <Text style={[typography.titleLarge, styles.greetingTitle, { color: colors.text }]}>
+              {greetingTitle}
+            </Text>
+            <Text
+              style={[typography.bodySmall, styles.greetingSubtitle, { color: colors.textMuted }]}
+            >
+              {greetingSubtitle}
+            </Text>
+          </View>
+          <View style={styles.greetingMeta}>
+            <Badge label={badgeLabel} tone={badgeTone} />
+          </View>
+        </View>
+
         {loadError && (
           <StatusWithRetry
             style={styles.statusBlock}
@@ -218,19 +294,14 @@ export const AvailableTab = () => {
           <DeliveryEmptyState
             icon={<MaterialCommunityIcons name="bicycle" size={44} color={colors.primary} />}
             title="No orders nearby"
-            message="You're online, but there are no pickup requests in your area right now. New offers will appear here automatically."
             tips={[
-              {
-                icon: <MaterialCommunityIcons name="radio-tower" size={18} color={colors.primary} />,
-                text: 'Stay online to receive new delivery offers.',
-              },
               {
                 icon: <MaterialCommunityIcons name="map-marker-radius-outline" size={18} color={colors.primary} />,
                 text: 'Keep location enabled so we can match you with nearby stores.',
               },
               {
                 icon: <MaterialCommunityIcons name="clock-outline" size={18} color={colors.primary} />,
-                text: 'Offers last 30 seconds, so check back often.',
+                text: 'Offers last 30 seconds — accept quickly when one appears.',
               },
             ]}
             action={
