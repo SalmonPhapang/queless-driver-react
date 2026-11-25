@@ -3,7 +3,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { Button } from '../../components/Button';
-import { EmptyState } from '../../components/EmptyState';
+import { DeliveryEmptyState } from '../../components/DeliveryEmptyState';
 import { OrderCard, OrderRoute } from '../../components/OrderCard';
 import { Screen } from '../../components/Screen';
 import { DeliveryOrdersSkeleton } from '../../components/Skeleton';
@@ -19,53 +19,39 @@ import { typography } from '../../theme/typography';
 
 const styles = StyleSheet.create({
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  content: { paddingBottom: 16 },
+  content: { flex: 1, paddingBottom: 16 },
   sectionTitle: { paddingHorizontal: 16, paddingBottom: 12, ...typography.headlineSmall },
   cards: { paddingHorizontal: 16 },
   meta: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, paddingBottom: 14 },
   metaText: { ...typography.bodySmall },
   metaTotal: { marginLeft: 'auto', ...typography.labelLarge },
-  emptyAction: { width: '100%', marginTop: 24, alignItems: 'center' },
-  tip: { width: '100%', flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 12, borderRadius: 12, borderWidth: 1 },
-  tipText: { flex: 1, ...typography.caption, textAlign: 'left' },
-  refreshButton: { width: 200, marginTop: 32 },
-  pullHint: { marginTop: 8, ...typography.caption },
 });
 
 const EmptyHistory = ({ onRefresh }: { onRefresh?: () => void }) => {
   const { colors } = useTheme();
   return (
-    <EmptyState
+    <DeliveryEmptyState
+      icon={<MaterialCommunityIcons name="clipboard-check-outline" size={44} color={colors.primary} />}
       title="No completed orders yet"
       message="Your delivery history will appear here once you've completed your first order."
-      icon={<MaterialCommunityIcons name="clipboard-check-outline" size={64} color={colors.primary} />}
+      tips={[
+        {
+          icon: <MaterialCommunityIcons name="information-outline" size={18} color={colors.primary} />,
+          text: 'Switch to the Available tab to find new orders.',
+        },
+        {
+          icon: <MaterialCommunityIcons name="white-balance-sunny" size={18} color={colors.primary} />,
+          text: 'Keep your app open to receive order notifications.',
+        },
+      ]}
       action={
-        <View style={styles.emptyAction}>
-          <View style={{ gap: 8 }}>
-            <View style={[styles.tip, { borderColor: colors.divider, backgroundColor: colors.card }]}>
-              <MaterialCommunityIcons name="information-outline" size={18} color={colors.primary} />
-              <Text style={[styles.tipText, { color: colors.textMuted }]}>
-                Switch to the Available tab to find new orders.
-              </Text>
-            </View>
-            <View style={[styles.tip, { borderColor: colors.divider, backgroundColor: colors.card }]}>
-              <MaterialCommunityIcons name="white-balance-sunny" size={18} color={colors.primary} />
-              <Text style={[styles.tipText, { color: colors.textMuted }]}>
-                Keep your app open to receive order notifications.
-              </Text>
-            </View>
-          </View>
-          <View style={styles.refreshButton}>
-            <Button
-              variant="primary"
-              block
-              icon={<MaterialCommunityIcons name="refresh" size={20} color={colors.onPrimary} />}
-              title="REFRESH"
-              onPress={() => onRefresh?.()}
-            />
-          </View>
-          <Text style={[styles.pullHint, { color: colors.subtext }]}>Pull down to refresh anytime</Text>
-        </View>
+        <Button
+          variant="primary"
+          block
+          icon={<MaterialCommunityIcons name="refresh" size={18} color={colors.onPrimary} />}
+          title="REFRESH HISTORY"
+          onPress={() => onRefresh?.()}
+        />
       }
     />
   );

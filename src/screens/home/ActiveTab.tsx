@@ -3,7 +3,7 @@ import { Linking, StyleSheet, View } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { Button } from '../../components/Button';
-import { EmptyState } from '../../components/EmptyState';
+import { DeliveryEmptyState } from '../../components/DeliveryEmptyState';
 import { OrderCard, OrderItemsRow, OrderRoute } from '../../components/OrderCard';
 import { Screen } from '../../components/Screen';
 import { DeliveryOrdersSkeleton } from '../../components/Skeleton';
@@ -20,12 +20,13 @@ import { useTheme } from '../../theme/ThemeContext';
 
 const styles = StyleSheet.create({
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  content: { paddingBottom: 16 },
+  content: { flex: 1, paddingBottom: 16 },
   statusBlock: { marginBottom: 12, marginHorizontal: 16 },
   cards: { paddingHorizontal: 16 },
   footer: { paddingTop: 8, paddingHorizontal: 16, paddingBottom: 12 },
   actionRow: { flexDirection: 'row', gap: 10 },
   cta: { marginTop: 12 },
+  emptyActions: { flexDirection: 'row', gap: 10 },
 });
 
 const launchMaps = (query: string): void => {
@@ -176,17 +177,36 @@ export const ActiveTab = () => {
         )}
 
         {orders.length === 0 ? (
-          <EmptyState
-            title="No active orders"
-            message="Orders you accept will appear here."
-            icon={<MaterialCommunityIcons name="bike" size={64} color={colors.textMuted} />}
+          <DeliveryEmptyState
+            icon={<MaterialCommunityIcons name="truck-delivery-outline" size={44} color={colors.primary} />}
+            title="No active delivery"
+            message="When you accept an order, its pickup, route and delivery actions will show up here."
+            tips={[
+              {
+                icon: <MaterialCommunityIcons name="bicycle" size={18} color={colors.primary} />,
+                text: 'Head to Available to find a new delivery.',
+              },
+              {
+                icon: <MaterialCommunityIcons name="navigation-outline" size={18} color={colors.primary} />,
+                text: 'Turn-by-turn navigation appears once you pick up an order.',
+              },
+            ]}
             action={
-              <Button
-                variant="outline"
-                icon={<MaterialCommunityIcons name="refresh" size={18} color={colors.secondary} />}
-                title="REFRESH"
-                onPress={() => void load()}
-              />
+              <View style={styles.emptyActions}>
+                <Button
+                  variant="outline"
+                  block
+                  icon={<MaterialCommunityIcons name="refresh" size={18} color={colors.secondary} />}
+                  title="REFRESH"
+                  onPress={() => void load()}
+                />
+                <Button
+                  variant="primary"
+                  block
+                  title="BROWSE ORDERS"
+                  onPress={() => router.push('/home/available')}
+                />
+              </View>
             }
           />
         ) : (

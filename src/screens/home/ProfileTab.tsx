@@ -403,7 +403,8 @@ export const ProfileTab = () => {
         <Switch
           value={isOnline}
           onValueChange={(checked) => void toggleOnlineStatus(checked)}
-          label="Available for Orders"
+          style={styles.statusSwitch}
+          disabled={driver == null}
         />
       </Card>
 
@@ -771,6 +772,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
     padding: 14,
+  },
+  statusSwitch: {
+    flexShrink: 0,
   },
   iconBubble: {
     width: 44,

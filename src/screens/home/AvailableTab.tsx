@@ -3,7 +3,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { Button } from '../../components/Button';
-import { EmptyState } from '../../components/EmptyState';
+import { DeliveryEmptyState } from '../../components/DeliveryEmptyState';
 import { OrderCard, OrderItemsRow, OrderRoute } from '../../components/OrderCard';
 import { Screen } from '../../components/Screen';
 import { DeliveryOrdersSkeleton } from '../../components/Skeleton';
@@ -23,7 +23,7 @@ type StatusVariant = 'error' | 'warning' | 'info' | 'success';
 
 const styles = StyleSheet.create({
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  content: { paddingBottom: 16 },
+  content: { flex: 1, paddingBottom: 16 },
   statusBlock: { marginBottom: 12 },
   banner: {
     flexDirection: 'row',
@@ -215,15 +215,30 @@ export const AvailableTab = () => {
         )}
 
         {orders.length === 0 ? (
-          <EmptyState
-            title="No available orders"
-            message="Orders will appear here for you to accept."
-            icon={<MaterialCommunityIcons name="package-variant-closed" size={64} color={colors.textMuted} />}
+          <DeliveryEmptyState
+            icon={<MaterialCommunityIcons name="bicycle" size={44} color={colors.primary} />}
+            title="No orders nearby"
+            message="You're online, but there are no pickup requests in your area right now. New offers will appear here automatically."
+            tips={[
+              {
+                icon: <MaterialCommunityIcons name="radio-tower" size={18} color={colors.primary} />,
+                text: 'Stay online to receive new delivery offers.',
+              },
+              {
+                icon: <MaterialCommunityIcons name="map-marker-radius-outline" size={18} color={colors.primary} />,
+                text: 'Keep location enabled so we can match you with nearby stores.',
+              },
+              {
+                icon: <MaterialCommunityIcons name="clock-outline" size={18} color={colors.primary} />,
+                text: 'Offers last 30 seconds, so check back often.',
+              },
+            ]}
             action={
               <Button
-                variant="outline"
-                icon={<MaterialCommunityIcons name="refresh" size={18} color={colors.secondary} />}
-                title="REFRESH"
+                variant="primary"
+                block
+                icon={<MaterialCommunityIcons name="refresh" size={18} color={colors.onPrimary} />}
+                title="REFRESH ORDERS"
                 onPress={() => void load()}
               />
             }
