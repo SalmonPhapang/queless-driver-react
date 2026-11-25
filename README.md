@@ -70,7 +70,10 @@ EAS Update/export uploads, pull the token locally and run
 - Live location published from the native background task to
   `driver_assignments` and mirrored to `driver_locations`.
 - Runs edge-to-edge: the Android navigation bar and status bar are hidden while
-  the app is open, and the iOS status bar is hidden.
+  the app is open, and the iOS status bar is hidden. Expo Go and stale dev
+  clients do not include the native navigation-bar module, so the app skips that
+  override instead of crashing. Use a fresh native build/dev client for hidden
+  bars and native Sentry reporting.
 - Driver notifications use `app_id: driver` with real `ios`/`android` platform
   and OS version; topics are `DRIVER_ORDERS_READY`, `driver-<driverId>`, and
   `marketing`.

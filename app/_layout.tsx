@@ -3,7 +3,6 @@ import { Stack } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import { AppState, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { NavigationBar } from 'expo-navigation-bar';
 import { StatusBar } from 'expo-status-bar';
 import { ToastHost } from '../src/components/ToastHost';
 import { DialogHost } from '../src/components/DialogHost';
@@ -25,13 +24,17 @@ import { useUpdateStore } from '../src/stores/updateStore';
 import { ThemeProvider, useTheme } from '../src/theme/ThemeContext';
 import { useAppFonts } from '../src/theme/fonts';
 import { typography } from '../src/theme/typography';
+import {
+  hideAndroidNavigationBar,
+  NavigationBarComponent,
+} from '../src/utils/navigationBar';
 
 function useFullscreen() {
   useEffect(() => {
     const timers: ReturnType<typeof setTimeout>[] = [];
     const hideSystemBars = () => {
       StatusBar.setHidden(true);
-      if (Platform.OS === 'android') NavigationBar.setHidden(true);
+      if (Platform.OS === 'android') hideAndroidNavigationBar();
     };
     const hideAfterTransitions = () => {
       hideSystemBars();
@@ -152,7 +155,7 @@ function RootLayout() {
     <ThemeProvider>
       <SafeAreaProvider>
         <StatusBar hidden style="light" />
-        <NavigationBar hidden />
+        {NavigationBarComponent ? <NavigationBarComponent hidden /> : null}
         {fontsLoaded ? <RootNavigator /> : <LoadingScreen message="Preparing Queless…" />}
       </SafeAreaProvider>
     </ThemeProvider>
