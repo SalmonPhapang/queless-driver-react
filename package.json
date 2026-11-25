@@ -4,7 +4,8 @@
   "private": true,
   "main": "expo-router/entry",
   "scripts": {
-    "start": "expo start --dev-client",
+    "start": "expo start --go",
+    "start:dev-client": "expo start --dev-client",
     "android": "expo run:android",
     "ios": "expo run:ios",
     "sourcemaps:upload": "expo export --platform all --output-dir dist --source-maps external && npm exec -- @sentry/expo-upload-sourcemaps dist",

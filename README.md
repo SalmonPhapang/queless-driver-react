@@ -27,8 +27,13 @@ port stays in [`PORTING.md`](PORTING.md).
 ```bash
 cp .env.example .env       # fill in EXPO_PUBLIC_SUPABASE_ANON_KEY
 npm install                # use npm.cmd on Windows if scripts are restricted
-npm run start              # Expo dev client
+npm run start              # Expo Go
 ```
+
+Expo Go is supported for UI work. Since SDK 53 it no longer ships the native
+notification module, so remote push tokens/topics and local notifications are
+disabled there; the Supabase realtime order bridge still drives the app. Use a
+development build when testing push alerts, native Sentry, or hidden system bars.
 
 Native builds require a development client. The EAS project is
 `@developers_sourcecodes/queless-driver-mobile`
@@ -36,7 +41,8 @@ Native builds require a development client. The EAS project is
 
 Scripts (run from the repository root):
 
-- `npm run start` — Expo dev server with dev client
+- `npm run start` — Expo Go dev server
+- `npm run start:dev-client` — custom native development build
 - `npm run ios` / `npm run android` — local native run
 - `npm run typecheck` — TypeScript check
 - `npx expo export --platform ios|android` — production JS bundle check

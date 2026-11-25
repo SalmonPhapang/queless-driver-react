@@ -4,13 +4,14 @@
 
 import * as Audio from 'expo-audio';
 import * as Haptics from 'expo-haptics';
-import * as Notifications from 'expo-notifications';
+import type * as NotificationsTypes from 'expo-notifications';
 import Constants from 'expo-constants';
 import { router } from 'expo-router';
 import { Platform } from 'react-native';
-import { SupabaseConfig } from '../config/supabaseClient';
 import { AppConfig } from '../config/appConfig';
+import { SupabaseConfig } from '../config/supabaseClient';
 import { Prefs, PrefKeys } from '../lib/storage';
+import { getNotificationsModule } from '../utils/nativeNotifications';
 
 const NEW_ORDERS_CHANNEL = 'driver_new_orders';
 const ALERT_AUTO_STOP_MS = 30_000;
@@ -25,15 +26,22 @@ if (AppConfig.isExpoGo) {
   );
 }
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-  }),
-});
+const bootstrapNotifications = getNotificationsModule();
+if (bootstrapNotifications) {
+  try {
+    bootstrapNotifications.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldShowAlert: true,
+        shouldShowBanner: true,
+        shouldShowList: true,
+        shouldPlaySound: true,
+        shouldSetBadge: false,
+      }),
+    });
+  } catch (error) {
+    console.warn('[push] Could not set notification handler:', error);
+  }
+}
 
 export const PushTopics = {
   marketing: 'marketing',
@@ -88,16 +96,17 @@ const writeTopics = (topics: Set<string>): void => {
   Prefs.setString(PrefKeys.pushTopics, JSON.stringify([...topics]));
 };
 
-type PermissionResponseWithIos = Notifications.PermissionResponse & {
-  ios?: { status?: Notifications.IosAuthorizationStatus };
+type PermissionResponseWithIos = NotificationsTypes.PermissionResponse & {
+  ios?: { status?: NotificationsTypes.IosAuthorizationStatus };
 };
 
 const toAuthorization = (
-  permission: Notifications.PermissionResponse,
+  permission: NotificationsTypes.PermissionResponse,
 ): PushAuthorization => {
   if (permission.granted) return 'authorized';
   const ios = (permission as PermissionResponseWithIos).ios;
-  if (ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL) {
+  const notifications = getNotificationsModule();
+  if (ios?.status === notifications?.IosAuthorizationStatus.PROVISIONAL) {
     return 'provisional';
   }
   if (permission.canAskAgain) return 'notDetermined';
@@ -217,13 +226,14 @@ const startNotificationBridge = (userId: string): void => {
 };
 
 const fetchPushToken = async (): Promise<{ token: string; provider: PushProvider } | null> => {
-  // These calls throw on Android Expo Go, so skip them entirely instead of
-  // relying on a catch that leaves a fatal native warning in the log.
-  if (!AppConfig.remotePushAvailable) return null;
+  // Expo Go and stale native clients cannot load the notification module, so
+  // skip token APIs entirely instead of triggering a fatal native exception.
+  const notifications = getNotificationsModule();
+  if (!AppConfig.remotePushAvailable || !notifications) return null;
 
   try {
     const projectId = Constants.expoConfig?.extra?.eas?.projectId as string | undefined;
-    const expoToken = await Notifications.getExpoPushTokenAsync(
+    const expoToken = await notifications.getExpoPushTokenAsync(
       projectId ? { projectId } : undefined,
     );
     const token = String(expoToken?.data ?? '').trim();
@@ -234,7 +244,7 @@ const fetchPushToken = async (): Promise<{ token: string; provider: PushProvider
 
   if (Platform.OS !== 'android') return null;
   try {
-    const deviceToken = await Notifications.getDevicePushTokenAsync();
+    const deviceToken = await notifications.getDevicePushTokenAsync();
     const token = String(deviceToken?.data ?? '').trim();
     return token ? { token, provider: 'fcm' } : null;
   } catch (error) {
@@ -294,50 +304,58 @@ export const PushService = {
     if (initialized || !AppConfig.featureFirebase) return;
     initialized = true;
 
-    await Promise.allSettled([
-      Notifications.setNotificationChannelAsync(NEW_ORDERS_CHANNEL, {
-        name: 'New Orders',
-        description: 'Notifications when a new order is offered or assigned',
-        importance: Notifications.AndroidImportance.MAX,
-        sound: 'default',
-        vibrationPattern: [0, 400, 200, 400, 200, 400],
-        lightColor: '#D13540',
-      }),
-    ]);
+    const notifications = getNotificationsModule();
+    if (!notifications) return;
 
-    Notifications.addNotificationReceivedListener((notification) => {
-      handleIncomingPayload(payloadData(notification.request.content.data));
-    });
+    try {
+      await Promise.allSettled([
+        notifications.setNotificationChannelAsync(NEW_ORDERS_CHANNEL, {
+          name: 'New Orders',
+          description: 'Notifications when a new order is offered or assigned',
+          importance: notifications.AndroidImportance.MAX,
+          sound: 'default',
+          vibrationPattern: [0, 400, 200, 400, 200, 400],
+          lightColor: '#D13540',
+        }),
+      ]);
 
-    Notifications.addNotificationResponseReceivedListener((response) => {
-      void PushService.stopNewOrderAlert();
-      const payload = payloadData(response.notification.request.content.data);
-      const orderId = orderIdFromPayload(payload);
-      if (orderId) router.push(`/home/orders/${orderId}`);
-      else router.push('/home/active');
-    });
-
-    const last = await Notifications.getLastNotificationResponseAsync().catch(() => null);
-    if (last) {
-      const payload = payloadData(last.notification.request.content.data);
-      const orderId = orderIdFromPayload(payload);
-      if (orderId) router.push(`/home/orders/${orderId}`);
-    }
-
-    // Expo Go's token listener is one of the APIs that throws outright on
-    // Android. Skip it there; real devices/development builds still register.
-    if (AppConfig.remotePushAvailable) {
-      Notifications.addPushTokenListener(() => {
-        const userId = registeredUserId ?? SupabaseConfig.currentUserId;
-        if (userId) void PushService.registerDriver(userId);
+      notifications.addNotificationReceivedListener((notification) => {
+        handleIncomingPayload(payloadData(notification.request.content.data));
       });
+
+      notifications.addNotificationResponseReceivedListener((response) => {
+        void PushService.stopNewOrderAlert();
+        const payload = payloadData(response.notification.request.content.data);
+        const orderId = orderIdFromPayload(payload);
+        if (orderId) router.push(`/home/orders/${orderId}`);
+        else router.push('/home/active');
+      });
+
+      const last = await notifications.getLastNotificationResponseAsync().catch(() => null);
+      if (last) {
+        const payload = payloadData(last.notification.request.content.data);
+        const orderId = orderIdFromPayload(payload);
+        if (orderId) router.push(`/home/orders/${orderId}`);
+      }
+
+      // Token listeners throw in Expo Go. Skip them there; real devices and
+      // development builds still register token refreshes.
+      if (AppConfig.remotePushAvailable) {
+        notifications.addPushTokenListener(() => {
+          const userId = registeredUserId ?? SupabaseConfig.currentUserId;
+          if (userId) void PushService.registerDriver(userId);
+        });
+      }
+    } catch (error) {
+      console.warn('[push] Notification initialization failed:', error);
     }
   },
 
   async notificationSettings(): Promise<PushAuthorization> {
-    if (!AppConfig.remotePushAvailable) return 'authorized';
+    const notifications = getNotificationsModule();
+    if (!AppConfig.remotePushAvailable || !notifications) return 'authorized';
     await PushService.initialize();
-    return toAuthorization(await Notifications.getPermissionsAsync());
+    return toAuthorization(await notifications.getPermissionsAsync());
   },
 
   async isAuthorized(): Promise<boolean> {
@@ -345,11 +363,12 @@ export const PushService = {
   },
 
   async requestPermission(): Promise<boolean> {
-    if (!AppConfig.remotePushAvailable) return true;
+    const notifications = getNotificationsModule();
+    if (!AppConfig.remotePushAvailable || !notifications) return true;
     await PushService.initialize();
-    const current = await Notifications.getPermissionsAsync();
+    const current = await notifications.getPermissionsAsync();
     if (allowsPush(toAuthorization(current))) return true;
-    const requested = await Notifications.requestPermissionsAsync();
+    const requested = await notifications.requestPermissionsAsync();
     return allowsPush(toAuthorization(requested));
   },
 
@@ -430,9 +449,10 @@ export const PushService = {
     if (!trimmed) return false;
     const topics = readTopics();
     if (!topics.has(trimmed)) {
-      if (AppConfig.remotePushAvailable) {
+      const notifications = getNotificationsModule();
+      if (notifications && AppConfig.remotePushAvailable) {
         try {
-          await Notifications.subscribeToTopicAsync(trimmed);
+          await notifications.subscribeToTopicAsync(trimmed);
         } catch {
           // Best effort; retain locally so a later native build can retry.
         }
@@ -449,9 +469,10 @@ export const PushService = {
     const topics = readTopics();
     const trimmed = topic.trim();
     if (topics.delete(trimmed)) {
-      if (AppConfig.remotePushAvailable) {
+      const notifications = getNotificationsModule();
+      if (notifications && AppConfig.remotePushAvailable) {
         try {
-          await Notifications.unsubscribeFromTopicAsync(trimmed);
+          await notifications.unsubscribeFromTopicAsync(trimmed);
         } catch {
           // Best effort.
         }
@@ -483,11 +504,12 @@ export const PushService = {
   },
 
   async unsubscribeAll(): Promise<void> {
+    const notifications = getNotificationsModule();
     const stored = readTopics();
     for (const topic of stored) {
-      if (!AppConfig.remotePushAvailable) continue;
+      if (!notifications || !AppConfig.remotePushAvailable) continue;
       try {
-        await Notifications.unsubscribeFromTopicAsync(topic);
+        await notifications.unsubscribeFromTopicAsync(topic);
       } catch {
         // Best effort.
       }
@@ -540,14 +562,20 @@ export const PushService = {
     body: string,
     orderId?: string | null,
   ): Promise<void> {
-    await Notifications.scheduleNotificationAsync({
-      content: {
-        title,
-        body,
-        sound: true,
-        data: orderId ? { order_id: orderId, type: 'order' } : { type: 'order' },
-      },
-      trigger: Platform.OS === 'android' ? { channelId: NEW_ORDERS_CHANNEL } : null,
-    });
+    const notifications = getNotificationsModule();
+    if (!notifications) return;
+    try {
+      await notifications.scheduleNotificationAsync({
+        content: {
+          title,
+          body,
+          sound: true,
+          data: orderId ? { order_id: orderId, type: 'order' } : { type: 'order' },
+        },
+        trigger: Platform.OS === 'android' ? { channelId: NEW_ORDERS_CHANNEL } : null,
+      });
+    } catch (error) {
+      console.debug('[push] Local notification unavailable:', error);
+    }
   },
 };
