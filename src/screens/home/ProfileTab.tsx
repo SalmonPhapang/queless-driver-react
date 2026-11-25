@@ -8,6 +8,7 @@ import { Avatar } from '../../components/Avatar';
 import { Badge } from '../../components/Badge';
 import { Button } from '../../components/Button';
 import { Card } from '../../components/Card';
+import { ConfirmationDialog } from '../../components/ConfirmationDialog';
 import { Input } from '../../components/Input';
 import { Screen } from '../../components/Screen';
 import { SelectField } from '../../components/SelectField';
@@ -82,6 +83,8 @@ export const ProfileTab = () => {
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [themePickerOpen, setThemePickerOpen] = useState(false);
+  const [pendingStatus, setPendingStatus] = useState<boolean | null>(null);
+  const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
   const [updatePrompt, setUpdatePrompt] = useState<{
     version: AppVersion;
     status: 'none' | 'recommended' | 'forced';
@@ -276,14 +279,29 @@ export const ProfileTab = () => {
     }
   };
 
-  const toggleOnlineStatus = async (isOnline: boolean) => {
-    if (!user) return;
+  const requestStatusChange = (goOnline: boolean) => {
+    if (!user || driver == null || isUpdatingStatus) return;
+    setPendingStatus(goOnline);
+  };
+
+  const confirmStatusChange = async () => {
+    if (!user || pendingStatus == null) return;
+    const nextStatus = pendingStatus;
+    setIsUpdatingStatus(true);
     try {
-      await DriverService.updateOnlineStatus(user.id, isOnline);
+      await DriverService.updateOnlineStatus(user.id, nextStatus);
+      if (!alive.current) return;
+      setDriver((current) =>
+        current ? { ...current, driverStatus: nextStatus ? 'online' : 'offline' } : current,
+      );
+      setPendingStatus(null);
       void loadProfile();
     } catch (error) {
       if (!alive.current) return;
+      setPendingStatus(null);
       UiService.showError(`Status update failed: ${errorMessage(error)}`);
+    } finally {
+      if (alive.current) setIsUpdatingStatus(false);
     }
   };
 
@@ -402,9 +420,9 @@ export const ProfileTab = () => {
         </View>
         <Switch
           value={isOnline}
-          onValueChange={(checked) => void toggleOnlineStatus(checked)}
+          onValueChange={requestStatusChange}
           style={styles.statusSwitch}
-          disabled={driver == null}
+          disabled={driver == null || isUpdatingStatus}
         />
       </Card>
 
@@ -674,6 +692,30 @@ export const ProfileTab = () => {
           </View>
         </View>
       </Modal>
+
+      <ConfirmationDialog
+        visible={pendingStatus !== null}
+        icon={
+          pendingStatus === true ? (
+            <MaterialCommunityIcons name="flash" size={28} color={colors.onPrimary} />
+          ) : (
+            <MaterialCommunityIcons name="flash-off" size={28} color={colors.onPrimary} />
+          )
+        }
+        title={pendingStatus === true ? 'Go online?' : 'Go offline?'}
+        message={
+          pendingStatus === true
+            ? isVerified
+              ? "You'll start receiving new delivery offers right away. Make sure you're ready to head to the pickup."
+              : "You'll appear online, but accepting orders stays locked until your profile is verified."
+            : "You'll stop receiving new delivery offers until you switch back online. Any active delivery stays active."
+        }
+        confirmLabel={pendingStatus === true ? 'GO ONLINE' : 'GO OFFLINE'}
+        tone={pendingStatus === true ? 'success' : 'warning'}
+        loading={isUpdatingStatus}
+        onConfirm={() => void confirmStatusChange()}
+        onCancel={() => setPendingStatus(null)}
+      />
 
       {updatePrompt && (
         <UpdateDialog
