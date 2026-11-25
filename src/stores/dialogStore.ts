@@ -5,7 +5,6 @@ export interface AppDialogConfig {
   message: string;
   icon?: 'success' | 'info' | 'warning';
   confirmLabel?: string;
-  /** When false the dialog cannot be dismissed (barrierDismissible: false). */
   dismissible?: boolean;
   resolve: () => void;
 }
@@ -16,7 +15,6 @@ interface DialogState {
   close: () => void;
 }
 
-/** Modal equivalent of UiService.showSuccessDialog / showDialog. */
 export const useDialogStore = create<DialogState>((set, get) => ({
   dialog: null,
   open: (config) => set({ dialog: config }),

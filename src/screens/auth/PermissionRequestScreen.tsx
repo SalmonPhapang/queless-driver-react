@@ -1,17 +1,23 @@
 import type { ReactNode } from 'react';
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { BellRing, BatteryFull, Camera, CheckCircle2, Image, MapPin } from 'lucide-react';
-import { Button } from '../../components/ui/Button';
-import { Spinner } from '../../components/ui/Spinner';
+import * as ImagePicker from 'expo-image-picker';
+import * as Location from 'expo-location';
+import * as Notifications from 'expo-notifications';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import { router } from 'expo-router';
+import { Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Button } from '../../components/Button';
+import { Card } from '../../components/Card';
+import { Screen } from '../../components/Screen';
+import { Spinner } from '../../components/Spinner';
 import { AppConfig } from '../../config/appConfig';
-import { AuthService } from '../../services/authService';
-import { BatteryService } from '../../services/batteryService';
-import { LocationService } from '../../services/locationService';
 import { errorMessage } from '../../lib/errors';
 import { Prefs, PrefKeys } from '../../lib/storage';
-import { PushService } from '../../services/pushService';
+import { AuthService } from '../../services/authService';
+import { BatteryService } from '../../services/batteryService';
 import { UiService } from '../../services/uiService';
+import { useTheme } from '../../theme/ThemeContext';
+import { typography } from '../../theme/typography';
 
 interface TileProps {
   icon: ReactNode;
@@ -21,28 +27,27 @@ interface TileProps {
   onAllow: () => void;
 }
 
-const PermissionTile = ({ icon, title, description, granted, onAllow }: TileProps) => (
-  <div className={`permission-tile${granted ? ' permission-tile--granted' : ''}`}>
-    <div className="permission-tile__icon">{icon}</div>
-    <div className="grow">
-      <div className="permission-tile__title">{title}</div>
-      <p className="permission-tile__text">{description}</p>
-    </div>
-    {granted ? (
-      <span className="permission-tile__status">
-        <CheckCircle2 size={24} />
-      </span>
-    ) : (
-      <Button variant="primary" size="sm" pill onClick={onAllow} style={{ minHeight: 36 }}>
-        Allow
-      </Button>
-    )}
-  </div>
-);
+const PermissionTile = ({ icon, title, description, granted, onAllow }: TileProps) => {
+  const { colors } = useTheme();
+  return (
+    <Card style={styles.tile}>
+      <View style={[styles.tileIcon, { backgroundColor: colors.primaryContainer }]}>{icon}</View>
+      <View style={styles.grow}>
+        <Text style={[typography.titleSmall, styles.tileTitle, { color: colors.text }]}>{title}</Text>
+        <Text style={[typography.bodySmall, { color: colors.textMuted }]}>{description}</Text>
+      </View>
+      {granted ? (
+        <MaterialCommunityIcons name="check-circle" size={24} color={colors.success} />
+      ) : (
+        <Button title="Allow" variant="primary" size="sm" onPress={onAllow} />
+      )}
+    </Card>
+  );
+};
 
 /** Port of lib/screens/auth/permission_request_screen.dart. */
 export const PermissionRequestScreen = () => {
-  const navigate = useNavigate();
+  const { colors } = useTheme();
   const [locationGranted, setLocationGranted] = useState(false);
   const [notificationsGranted, setNotificationsGranted] = useState(!AppConfig.featureFirebase);
   const [cameraGranted, setCameraGranted] = useState(false);
@@ -53,7 +58,7 @@ export const PermissionRequestScreen = () => {
   const proceed = () => {
     Prefs.setBool(PrefKeys.permissionsRequested, true);
     // Flutter pushes RootRouter here so every gate is re-evaluated.
-    navigate('/', { replace: true });
+    router.replace('/');
   };
 
   const allGranted = (state: {
@@ -68,14 +73,14 @@ export const PermissionRequestScreen = () => {
   useEffect(() => {
     void (async () => {
       try {
-        const location = await LocationService.hasPermission();
+        const location = (await Location.getForegroundPermissionsAsync()).status === 'granted';
         const notifications = AppConfig.featureFirebase
-          ? (await PushService.notificationSettings()) === 'authorized'
+          ? (await Notifications.getPermissionsAsync()).status === 'granted'
           : true;
         const battery = await BatteryService.isExempted();
 
-        // Browsers expose no queryable camera grant; the tile starts as
-        // "not granted" until the driver allows it (native parity).
+        // Camera and photo tiles start as "not granted" until the driver taps
+        // Allow, matching the web port and the Flutter screen's initState.
         setLocationGranted(location);
         setNotificationsGranted(notifications);
         setBatteryGranted(battery);
@@ -122,7 +127,8 @@ export const PermissionRequestScreen = () => {
   };
 
   const requestLocation = async () => {
-    const granted = await LocationService.requestPermission();
+    const result = await Location.requestForegroundPermissionsAsync();
+    const granted = result.status === 'granted';
     setLocationGranted(granted);
     checkAndProceed({ location: granted });
   };
@@ -133,7 +139,8 @@ export const PermissionRequestScreen = () => {
       checkAndProceed({ notifications: true });
       return;
     }
-    const granted = await PushService.requestPermission();
+    const result = await Notifications.requestPermissionsAsync();
+    const granted = result.status === 'granted';
     setNotificationsGranted(granted);
     if (granted) await AuthService.syncFcmToken();
     checkAndProceed({ notifications: granted });
@@ -142,9 +149,7 @@ export const PermissionRequestScreen = () => {
   const requestCamera = async () => {
     let granted = false;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-      stream.getTracks().forEach((track) => track.stop());
-      granted = true;
+      granted = (await ImagePicker.requestCameraPermissionsAsync()).granted;
     } catch (error) {
       console.debug('Camera permission was not granted:', error);
     }
@@ -153,88 +158,113 @@ export const PermissionRequestScreen = () => {
   };
 
   const requestPhotos = async () => {
-    // A file input needs no separate grant in the browser; opening one is the
-    // closest equivalent to the native photo-library prompt.
-    setPhotosGranted(true);
-    checkAndProceed({ photos: true });
+    let granted = false;
+    try {
+      granted = (await ImagePicker.requestMediaLibraryPermissionsAsync()).granted;
+    } catch (error) {
+      console.debug('Photo library permission was not granted:', error);
+    }
+    setPhotosGranted(granted);
+    checkAndProceed({ photos: granted });
   };
 
   const requestBattery = async () => {
-    const granted = await BatteryService.showExemptionDialog();
+    let granted = false;
+    try {
+      // iOS has no battery-optimisation exemption to grant. On Android the
+      // settings screen is opened, then BatteryService persists the flag.
+      if (Platform.OS === 'android') {
+        await BatteryService.openBatterySettings();
+        granted = await BatteryService.requestExemption();
+      } else {
+        granted = await BatteryService.showExemptionDialog();
+      }
+    } catch (error) {
+      console.debug('Battery exemption dialog failed:', error);
+    }
     setBatteryGranted(granted);
     checkAndProceed({ battery: granted });
   };
 
   if (loading) {
     return (
-      <div className="app-frame">
-        <div className="loading-screen">
+      <Screen scroll={false} padded={false}>
+        <View style={styles.loading}>
           <Spinner />
-        </div>
-      </div>
+        </View>
+      </Screen>
     );
   }
 
   return (
-    <div className="app-frame">
-      <div className="screen">
-        <div className="screen-body screen-body--pad-lg" style={{ paddingTop: 56, paddingBottom: 32 }}>
-          <h1 className="page-title text-primary" style={{ fontSize: 28 }}>
-            Help us serve you better
-          </h1>
-          <p className="text-muted mt-12" style={{ fontSize: 16, lineHeight: 1.5 }}>
-            To provide the best delivery experience, we need a few permissions.
-          </p>
+    <Screen scroll={false} padded={false}>
+      <ScrollView contentContainerStyle={styles.body}>
+        <Text style={[typography.headlineLarge, styles.title, { color: colors.accent }]}>
+          Help us serve you better
+        </Text>
+        <Text style={[typography.bodyLarge, styles.subtitle, { color: colors.textMuted }]}>
+          To provide the best delivery experience, we need a few permissions.
+        </Text>
 
-          <div className="stack mt-32">
+        <View style={styles.tiles}>
+          <PermissionTile
+            icon={<MaterialCommunityIcons name="map-marker" size={22} color={colors.accent} />}
+            title="Location Access"
+            description="We use your location to find nearby stores and track your delivery in real-time."
+            granted={locationGranted}
+            onAllow={() => void requestLocation()}
+          />
+          <PermissionTile
+            icon={<MaterialCommunityIcons name="camera" size={22} color={colors.accent} />}
+            title="Camera Access"
+            description="Required for capturing your profile photo and scanning documents."
+            granted={cameraGranted}
+            onAllow={() => void requestCamera()}
+          />
+          <PermissionTile
+            icon={<MaterialCommunityIcons name="image" size={22} color={colors.accent} />}
+            title="Photo Gallery Access"
+            description="Required for uploading your profile picture from your device."
+            granted={photosGranted}
+            onAllow={() => void requestPhotos()}
+          />
+          {AppConfig.featureFirebase && (
             <PermissionTile
-              icon={<MapPin size={22} />}
-              title="Location Access"
-              description="We use your location to find nearby stores and track your delivery in real-time."
-              granted={locationGranted}
-              onAllow={() => void requestLocation()}
+              icon={<MaterialCommunityIcons name="bell-ring" size={22} color={colors.accent} />}
+              title="Notifications"
+              description="Get real-time updates about new orders, delivery status, and important alerts."
+              granted={notificationsGranted}
+              onAllow={() => void requestNotifications()}
             />
+          )}
+          {locationGranted && (
             <PermissionTile
-              icon={<Camera size={22} />}
-              title="Camera Access"
-              description="Required for capturing your profile photo and scanning documents."
-              granted={cameraGranted}
-              onAllow={() => void requestCamera()}
+              icon={<MaterialCommunityIcons name="battery-charging" size={22} color={colors.accent} />}
+              title="Battery Optimisation"
+              description="Allow Queless to run in the background so your location stays live when using other apps like Google Maps."
+              granted={batteryGranted}
+              onAllow={() => void requestBattery()}
             />
-            <PermissionTile
-              icon={<Image size={22} />}
-              title="Photo Gallery Access"
-              description="Required for uploading your profile picture from your device."
-              granted={photosGranted}
-              onAllow={() => void requestPhotos()}
-            />
-            {AppConfig.featureFirebase && (
-              <PermissionTile
-                icon={<BellRing size={22} />}
-                title="Notifications"
-                description="Get real-time updates about new orders, delivery status, and important alerts."
-                granted={notificationsGranted}
-                onAllow={() => void requestNotifications()}
-              />
-            )}
-            {locationGranted && (
-              <PermissionTile
-                icon={<BatteryFull size={22} />}
-                title="Battery Optimisation"
-                description="Allow Queless to run in the background so your location stays live when using other apps like Google Maps."
-                granted={batteryGranted}
-                onAllow={() => void requestBattery()}
-              />
-            )}
-          </div>
+          )}
+        </View>
 
-          <div className="center mt-32">
-            <button type="button" className="btn btn--ghost btn--sm" onClick={proceed}>
-              Skip for now
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
+        <View style={styles.skip}>
+          <Button title="Skip for now" variant="ghost" size="sm" onPress={proceed} />
+        </View>
+      </ScrollView>
+    </Screen>
   );
 };
+
+const styles = StyleSheet.create({
+  loading: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  body: { paddingTop: 56, paddingBottom: 32, paddingHorizontal: 24, flexGrow: 1 },
+  title: { fontSize: 28, fontWeight: '700' },
+  subtitle: { marginTop: 12, lineHeight: 24 },
+  tiles: { marginTop: 32, gap: 12 },
+  tile: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14 },
+  tileIcon: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
+  tileTitle: { fontWeight: '700' },
+  grow: { flex: 1 },
+  skip: { alignItems: 'center', marginTop: 32 },
+});

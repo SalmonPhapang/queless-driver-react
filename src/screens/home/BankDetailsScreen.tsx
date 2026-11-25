@@ -1,16 +1,20 @@
-import { useCallback, useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { AppBar } from '../../components/ui/AppBar';
-import { Button } from '../../components/ui/Button';
-import { SelectField, TextField } from '../../components/ui/Field';
-import { Spinner } from '../../components/ui/Spinner';
-import { StatusMessage } from '../../components/ui/StatusMessage';
+import React, { useCallback, useEffect, useState } from 'react';
+import { router } from 'expo-router';
+import { StyleSheet, Text, View } from 'react-native';
+import { AppBar } from '../../components/AppBar';
+import { Button } from '../../components/Button';
+import { Input } from '../../components/Input';
+import { Screen } from '../../components/Screen';
+import { SelectField } from '../../components/SelectField';
+import { Spinner } from '../../components/Spinner';
+import { StatusMessage } from '../../components/StatusMessage';
 import { errorMessage } from '../../lib/errors';
 import type { BankDetails, PaystackBank } from '../../services/payoutService';
 import { PayoutService } from '../../services/payoutService';
 import { UiService } from '../../services/uiService';
 import { useAuthStore } from '../../stores/authStore';
-import './bank-details.css';
+import { useTheme } from '../../theme/ThemeContext';
+import { typography } from '../../theme/typography';
 
 /**
  * Routed replacement for the old bank-details dialog.
@@ -21,8 +25,9 @@ import './bank-details.css';
  */
 const ACCOUNT_TYPES = ['Savings', 'Current', 'Cheque'];
 
+/** Port of lib/screens/home/bank_details_screen.dart. */
 export const BankDetailsScreen = () => {
-  const navigate = useNavigate();
+  const { colors } = useTheme();
   const user = useAuthStore((state) => state.user);
   const [banks, setBanks] = useState<PaystackBank[]>([]);
   const [loading, setLoading] = useState(true);
@@ -105,7 +110,7 @@ export const BankDetailsScreen = () => {
 
       await PayoutService.saveBankDetails(user.id, details, { email: user.email, phone: user.phone });
       UiService.showSuccess('Bank details saved.');
-      navigate('/home/wallet', { replace: true });
+      router.replace('/home/wallet');
     } catch (error) {
       setFormError(`Failed to save: ${errorMessage(error)}`);
     } finally {
@@ -114,101 +119,117 @@ export const BankDetailsScreen = () => {
   };
 
   return (
-    <div className="app-frame">
-      <div className="screen">
-        <AppBar
-          title="Bank Account Details"
-          back
-          onBack={() => navigate('/home/wallet', { replace: true })}
-        />
-        <div className="screen-body screen-body--pad-lg">
-          {loading ? (
-            <div className="loading-screen">
-              <Spinner />
-            </div>
-          ) : (
-            <div className="bank-details-form stack">
-              <p className="text-sm text-muted">
-                Enter your South African bank details for payouts. We pay out every Tuesday and
-                Thursday; your bank may take up to 1 business day to reflect the transfer. Your
-                first payout may take longer while your bank details are verified.
-              </p>
+    <Screen>
+      <AppBar
+        title="Bank Account Details"
+        onBack={() => router.replace('/home/wallet')}
+      />
+      <View style={styles.body}>
+        {loading ? (
+          <View style={styles.center}>
+            <Spinner />
+          </View>
+        ) : (
+          <View style={styles.form}>
+            <Text style={[typography.bodySmall, styles.intro, { color: colors.textMuted }]}>
+              {'Enter your South African bank details for payouts. We pay out every Tuesday and Thursday; your bank may take up to 1 business day to reflect the transfer. Your first payout may take longer while your bank details are verified.'}
+            </Text>
 
-              {loadError && (
+            {loadError && (
+              <View style={styles.errorBlock}>
                 <StatusMessage
                   variant="error"
                   title="Could not load bank details"
                   message={loadError}
-                  onRetry={() => void load()}
                 />
-              )}
+                <Button title="Try again" variant="outline" size="sm" onPress={() => void load()} />
+              </View>
+            )}
 
-              {formError && (
-                <StatusMessage
-                  variant="error"
-                  title="Could not save bank details"
-                  message={formError}
-                  onDismiss={() => setFormError(null)}
-                />
-              )}
-
-              <SelectField
-                label="Bank Name"
-                value={selectedBank?.name ?? ''}
-                onChange={(value) => {
-                  const bank = banks.find((option) => option.name === value);
-                  if (!bank) return;
-                  setSelectedBank(bank);
-                  setBranchCode(bank.code);
-                }}
-                options={banks.map((bank) => ({ value: bank.name, label: bank.name }))}
-                placeholder="Select a bank"
+            {formError && (
+              <StatusMessage
+                variant="error"
+                title="Could not save bank details"
+                message={formError}
+                onDismiss={() => setFormError(null)}
               />
+            )}
 
-              <TextField
-                label="Account Number"
-                value={accountNumber}
-                onChange={(event) => setAccountNumber(event.target.value)}
-                inputMode="numeric"
+            <SelectField
+              label="Bank Name"
+              value={selectedBank?.name ?? ''}
+              onChange={(value) => {
+                const bank = banks.find((option) => option.name === value);
+                if (!bank) return;
+                setSelectedBank(bank);
+                setBranchCode(bank.code);
+              }}
+              options={banks.map((bank) => ({ value: bank.name, label: bank.name }))}
+              placeholder="Select a bank"
+            />
+
+            <Input
+              label="Account Number"
+              value={accountNumber}
+              onChangeText={setAccountNumber}
+              keyboardType="numeric"
+            />
+
+            <Input
+              label="Account Holder"
+              value={accountHolder}
+              onChangeText={setAccountHolder}
+              placeholder="Full name as on bank account"
+            />
+
+            <Input label="Branch Code" value={branchCode} editable={false} />
+
+            <SelectField
+              label="Account Type"
+              value={accountType}
+              onChange={setAccountType}
+              options={accountTypeOptions.map((type) => ({ value: type, label: type }))}
+            />
+
+            <View style={styles.actions}>
+              <Button
+                title="Cancel"
+                variant="ghost"
+                disabled={saving}
+                onPress={() => router.replace('/home/wallet')}
               />
-
-              <TextField
-                label="Account Holder"
-                value={accountHolder}
-                onChange={(event) => setAccountHolder(event.target.value)}
-                placeholder="Full name as on bank account"
-              />
-
-              <TextField
-                label="Branch Code"
-                value={branchCode}
-                readOnly
-                wrapClassName="field--readonly"
-              />
-
-              <SelectField
-                label="Account Type"
-                value={accountType}
-                onChange={setAccountType}
-                options={accountTypeOptions.map((type) => ({ value: type, label: type }))}
-              />
-
-              <div className="bank-details-form__actions mt-24">
-                <Button
-                  variant="ghost"
-                  onClick={() => navigate('/home/wallet', { replace: true })}
-                  disabled={saving}
-                >
-                  Cancel
-                </Button>
-                <Button variant="primary" onClick={() => void save()} loading={saving}>
-                  Save Details
-                </Button>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
+              <Button title="Save Details" variant="primary" loading={saving} onPress={() => void save()} />
+            </View>
+          </View>
+        )}
+      </View>
+    </Screen>
   );
 };
+
+const styles = StyleSheet.create({
+  body: {
+    flex: 1,
+    padding: 16,
+  },
+  intro: {
+    lineHeight: 20,
+  },
+  center: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  form: {
+    gap: 16,
+  },
+  errorBlock: {
+    gap: 8,
+  },
+  actions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 12,
+    marginTop: 24,
+  },
+});

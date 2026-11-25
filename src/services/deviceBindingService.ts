@@ -5,6 +5,7 @@
 // regenerated, so a cleared storage / reinstall is deliberately a new device
 // that must re-verify by SMS.
 
+import { Platform } from 'react-native';
 import { SupabaseConfig } from '../config/supabaseClient';
 import { AppConfig } from '../config/appConfig';
 import { Prefs, PrefKeys } from '../lib/storage';
@@ -44,8 +45,8 @@ const resolveDescriptor = async (): Promise<DeviceDescriptor> => {
 
   return {
     id: deviceId,
-    platform: 'web',
-    osVersion: typeof navigator !== 'undefined' ? navigator.userAgent : '',
+    platform: Platform.OS,
+    osVersion: String(Platform.Version),
     appVersion: AppConfig.appVersion,
   };
 };

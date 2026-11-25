@@ -3,7 +3,7 @@
 // The authority is the database: `public.app_settings.device_binding_required`,
 // which only platform admins or the service role can change, and which the
 // server also *enforces*. Resolution order:
-//   1. VITE_ENABLE_DEVICE_BINDING — development builds only.
+//   1. EXPO_PUBLIC_ENABLE_DEVICE_BINDING — development builds only.
 //   2. The Supabase value.
 //   3. true — fail secure.
 //
@@ -30,7 +30,7 @@ const fetchRequired = async (): Promise<boolean | null> => {
     const result = await Promise.race([
       query,
       new Promise<{ data: null; error: Error }>((resolve) =>
-        window.setTimeout(
+        setTimeout(
           () => resolve({ data: null, error: new Error('timeout') }),
           FETCH_TIMEOUT_MS,
         ),
@@ -66,7 +66,7 @@ export const DeviceBindingPolicy = {
   async refresh(): Promise<void> {
     const override = AppConfig.deviceBindingOverride;
     // A local override skips the network entirely (development builds only).
-    const isReleaseBuild = !import.meta.env.DEV;
+    const isReleaseBuild = !__DEV__;
     const hasOverride = override != null && !isReleaseBuild;
     const serverValue = hasOverride ? null : await fetchRequired();
 

@@ -6,14 +6,14 @@ import { PushService } from './pushService';
 
 const withTimeout = <T>(promise: Promise<T>, ms: number, label: string): Promise<T> =>
   new Promise<T>((resolve, reject) => {
-    const timer = window.setTimeout(() => reject(new Error(`${label} timed out`)), ms);
+    const timer = setTimeout(() => reject(new Error(`${label} timed out`)), ms);
     promise.then(
       (value) => {
-        window.clearTimeout(timer);
+        clearTimeout(timer);
         resolve(value);
       },
       (error) => {
-        window.clearTimeout(timer);
+        clearTimeout(timer);
         reject(error);
       },
     );
@@ -135,11 +135,13 @@ export const DriverService = {
     if (error) throw error;
   },
 
-  async uploadProfileImage(userId: string, image: File): Promise<string> {
-    const fileName = `${userId}_${Date.now()}.png`;
+  async uploadProfileImage(userId: string, imageUri: string): Promise<string> {
+    const fileName = `${userId}_${Date.now()}.jpg`;
     const path = `driver/${fileName}`;
+    const response = await fetch(imageUri);
+    const body = await response.blob();
     const bucket = SupabaseConfig.client.storage.from('driver');
-    const { error } = await bucket.upload(path, image, { contentType: image.type || 'image/png' });
+    const { error } = await bucket.upload(path, body, { contentType: 'image/jpeg' });
     if (error) throw error;
     return bucket.getPublicUrl(path).data.publicUrl;
   },

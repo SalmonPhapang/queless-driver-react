@@ -1,60 +1,119 @@
-import { Modal } from './ui/Modal';
-import { Button } from './ui/Button';
+import React from 'react';
+import { Linking, Modal, Platform, StyleSheet, Text, View } from 'react-native';
+import * as WebBrowser from 'expo-web-browser';
+import { Button } from './Button';
+import { useTheme } from '../theme/ThemeContext';
+import { typography } from '../theme/typography';
 import type { AppVersion } from '../models/appVersion';
-import type { AppStoreUpdateStatus } from '../services/versionService';
+
+export type UpdateDialogStatus = 'none' | 'recommended' | 'forced';
 
 interface UpdateDialogProps {
   version: AppVersion;
-  status: AppStoreUpdateStatus;
+  status: UpdateDialogStatus;
   onClose: () => void;
 }
 
+const IOS_STORE_URL = 'https://apps.apple.com/app/queless-driver/id123456789';
+const ANDROID_STORE_URL = 'https://play.google.com/store/apps/details?id=com.queless.driver';
+
 /** Port of lib/widgets/update_dialog.dart. */
 export const UpdateDialog = ({ version, status, onClose }: UpdateDialogProps) => {
+  const { colors } = useTheme();
   const forced = status === 'forced';
 
   const openUpdate = () => {
-    const isIOS = /iPad|iPhone|iPod/.test(navigator.platform) ||
-      (/Macintosh/.test(navigator.platform) && navigator.maxTouchPoints > 1);
-    const fallback = isIOS
-      ? 'https://apps.apple.com/app/queless-driver/id123456789'
-      : 'https://play.google.com/store/apps/details?id=com.queless.driver';
+    const fallback = Platform.OS === 'ios' ? IOS_STORE_URL : ANDROID_STORE_URL;
     const url = version.downloadUrl ?? fallback;
-    window.open(url, '_blank', 'noopener,noreferrer');
+    void WebBrowser.openBrowserAsync(url).catch(() => {
+      void Linking.openURL(url).catch(() => undefined);
+    });
   };
 
   return (
     <Modal
-      dismissible={!forced}
-      onClose={onClose}
-      title={forced ? 'Update Required' : 'Update Available'}
-      actions={
-        <>
-          {!forced && (
-            <Button variant="ghost" onClick={onClose}>
-              Later
-            </Button>
-          )}
-          <Button variant="green" onClick={openUpdate}>
-            Update Now
-          </Button>
-        </>
-      }
+      visible
+      transparent
+      animationType="fade"
+      statusBarTranslucent
+      onRequestClose={forced ? () => undefined : onClose}
     >
-      <p style={{ color: 'var(--text)', fontSize: 15 }}>
-        A new version of the app is available ({version.version}).
-      </p>
-      {version.releaseNotes && (
-        <div>
-          <p style={{ fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>What's New:</p>
-          <p>{version.releaseNotes}</p>
-        </div>
-      )}
-      <p>
-        {forced
-          ? 'Please update to the latest version to continue using the app.'
-          : 'We recommend updating to the latest version for the best experience.'}
-      </p>
+      <View style={styles.overlay}>
+        <View
+          style={[
+            styles.card,
+            { backgroundColor: colors.card, borderColor: colors.divider },
+          ]}
+        >
+          <Text style={[typography.titleLarge, styles.title, { color: colors.text }]}>
+            {forced ? 'Update Required' : 'Update Available'}
+          </Text>
+
+          <Text style={[typography.bodyMedium, styles.body, { color: colors.text }]}>
+            {`A new version of the app is available (${version.version}).`}
+          </Text>
+
+          {version.releaseNotes ? (
+            <View style={styles.notes}>
+              <Text style={[typography.labelLarge, styles.notesTitle, { color: colors.text }]}>
+                What's New:
+              </Text>
+              <Text style={[typography.bodyMedium, { color: colors.text }]}>
+                {version.releaseNotes}
+              </Text>
+            </View>
+          ) : null}
+
+          <Text style={[typography.bodyMedium, styles.body, { color: colors.textMuted }]}>
+            {forced
+              ? 'Please update to the latest version to continue using the app.'
+              : 'We recommend updating to the latest version for the best experience.'}
+          </Text>
+
+          <View style={styles.actions}>
+            {!forced && (
+              <Button title="Later" variant="ghost" onPress={onClose} />
+            )}
+            <Button title="Update Now" variant="green" onPress={openUpdate} />
+          </View>
+        </View>
+      </View>
     </Modal>
   );
 };
+
+const styles = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  card: {
+    width: '100%',
+    maxWidth: 420,
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 24,
+  },
+  title: {
+    marginBottom: 16,
+  },
+  body: {
+    marginBottom: 12,
+  },
+  notes: {
+    marginBottom: 12,
+  },
+  notesTitle: {
+    marginBottom: 4,
+  },
+  actions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 8,
+  },
+});

@@ -1,25 +1,71 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Boxes, LocateOff, RefreshCw, TriangleAlert } from 'lucide-react';
-import { Button } from '../../components/ui/Button';
-import { StatusMessage } from '../../components/ui/StatusMessage';
-import { errorMessage } from '../../lib/errors';
-import { Spinner } from '../../components/ui/Spinner';
+import { StyleSheet, Text, View } from 'react-native';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { router } from 'expo-router';
+import { Button } from '../../components/Button';
+import { EmptyState } from '../../components/EmptyState';
 import { OrderCard, OrderItemsRow, OrderRoute } from '../../components/OrderCard';
+import { Screen } from '../../components/Screen';
+import { Spinner } from '../../components/Spinner';
+import { StatusMessage } from '../../components/StatusMessage';
+import { errorMessage } from '../../lib/errors';
 import type { DeliveryOrder } from '../../models/deliveryOrder';
 import type { Driver } from '../../models/driver';
 import { OrderStatusX } from '../../models/statuses';
 import { DriverService } from '../../services/driverService';
-import {
-  LOCATION_SETTINGS_HELP,
-  LocationService,
-} from '../../services/locationService';
+import { LOCATION_SETTINGS_HELP, LocationService } from '../../services/locationService';
 import { OrderService } from '../../services/orderService';
 import { useAuthStore } from '../../stores/authStore';
+import { useTheme } from '../../theme/ThemeContext';
+import { typography } from '../../theme/typography';
+
+type StatusVariant = 'error' | 'warning' | 'info' | 'success';
+
+const styles = StyleSheet.create({
+  centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  content: { paddingBottom: 16 },
+  statusBlock: { marginBottom: 12 },
+  banner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 12,
+    marginHorizontal: 16,
+    marginBottom: 12,
+  },
+  bannerText: { flex: 1, ...typography.bodySmall },
+  cards: { paddingHorizontal: 16 },
+  cardFooter: { paddingTop: 12 },
+});
+
+const StatusWithRetry = ({
+  variant,
+  title,
+  message,
+  retryLabel = 'Try again',
+  onRetry,
+  onDismiss,
+  style,
+}: {
+  variant: StatusVariant;
+  title?: string;
+  message: string;
+  retryLabel?: string;
+  onRetry: () => void;
+  onDismiss?: () => void;
+  style?: object;
+}) => (
+  <View style={style}>
+    <StatusMessage variant={variant} title={title ?? ''} message={message} onDismiss={onDismiss} />
+    <Button variant="outline" size="sm" title={retryLabel} onPress={onRetry} />
+  </View>
+);
 
 /** Port of lib/screens/home/tabs/available_tab.dart. */
 export const AvailableTab = () => {
-  const navigate = useNavigate();
+  const { colors } = useTheme();
   const user = useAuthStore((state) => state.user);
   const [orders, setOrders] = useState<DeliveryOrder[]>([]);
   const [loading, setLoading] = useState(true);
@@ -72,7 +118,7 @@ export const AvailableTab = () => {
         setLocationHelpVisible(true);
       } else {
         setLocationRequestError(
-          'Location access was not granted. Enable it in your browser settings to see nearby orders.',
+          `Location access was not granted to see nearby orders. ${LOCATION_SETTINGS_HELP}`,
         );
       }
     } catch (error) {
@@ -85,103 +131,114 @@ export const AvailableTab = () => {
 
   if (loading) {
     return (
-      <div className="loading-screen">
-        <Spinner />
-      </div>
+      <Screen padded={false} scroll={false}>
+        <View style={styles.centered}>
+          <Spinner />
+        </View>
+      </Screen>
     );
   }
 
   return (
-    <div style={{ paddingBottom: 16 }}>
-      {loadError && (
-        <StatusMessage
-          variant="error"
-          title="Could not load orders"
-          message={loadError}
-          onRetry={() => void load()}
-        />
-      )}
+    <Screen padded={false} scroll={false}>
+      <View style={styles.content}>
+        {loadError && (
+          <StatusWithRetry
+            style={styles.statusBlock}
+            variant="error"
+            title="Could not load orders"
+            message={loadError}
+            onRetry={() => void load()}
+          />
+        )}
 
-      {hasLocationPermission === false && (
-        <div className="info-banner" style={{ background: 'var(--primary-soft-2)' }}>
-          <LocateOff size={20} className="text-primary" />
-          <span className="grow text-primary text-sm" style={{ fontWeight: 600 }}>
-            Enable location to see nearby orders
-          </span>
-          <button type="button" className="btn btn--ghost btn--sm" onClick={() => void requestLocation()}>
-            ENABLE
-          </button>
-        </div>
-      )}
+        {hasLocationPermission === false && (
+          <View style={[styles.banner, { backgroundColor: colors.primaryContainer }]}>
+            <MaterialCommunityIcons name="map-marker-off" size={20} color={colors.primary} />
+            <Text style={[styles.bannerText, { color: colors.primary, fontWeight: '600' }]}>
+              Enable location to see nearby orders
+            </Text>
+            <Button
+              variant="ghost"
+              size="sm"
+              title="ENABLE"
+              onPress={() => void requestLocation()}
+            />
+          </View>
+        )}
 
-      {locationHelpVisible && (
-        <StatusMessage
-          variant="warning"
-          title="Location Permission Required"
-          message={`To see nearby orders, please enable location permissions in your app settings. ${LOCATION_SETTINGS_HELP}`}
-          onRetry={() => void requestLocation()}
-          retryLabel="Try again"
-          onDismiss={() => setLocationHelpVisible(false)}
-        />
-      )}
+        {locationHelpVisible && (
+          <StatusWithRetry
+            style={styles.statusBlock}
+            variant="warning"
+            title="Location Permission Required"
+            message={`To see nearby orders, please enable location permissions in your app settings. ${LOCATION_SETTINGS_HELP}`}
+            onRetry={() => void requestLocation()}
+            onDismiss={() => setLocationHelpVisible(false)}
+          />
+        )}
 
-      {locationRequestError && (
-        <StatusMessage
-          variant="error"
-          title="Location unavailable"
-          message={locationRequestError}
-          onRetry={() => void requestLocation()}
-        />
-      )}
+        {locationRequestError && (
+          <StatusWithRetry
+            style={styles.statusBlock}
+            variant="error"
+            title="Location unavailable"
+            message={locationRequestError}
+            onRetry={() => void requestLocation()}
+          />
+        )}
 
-      {!isVerified && (
-        <div className="info-banner info-banner--orange">
-          <TriangleAlert size={20} />
-          <span className="grow text-sm" style={{ fontWeight: 600 }}>
-            Verification Pending. You cannot accept orders until an admin verifies your profile.
-          </span>
-        </div>
-      )}
+        {!isVerified && (
+          <View style={[styles.banner, { backgroundColor: colors.errorContainer }]}>
+            <MaterialCommunityIcons name="alert-outline" size={20} color={colors.warning} />
+            <Text style={[styles.bannerText, { fontWeight: '600' }]}>
+              Verification Pending. You cannot accept orders until an admin verifies your profile.
+            </Text>
+          </View>
+        )}
 
-      {orders.length === 0 ? (
-        <div className="empty" style={{ minHeight: '55vh' }}>
-          <div className="empty__icon">
-            <Boxes size={64} />
-          </div>
-          <div className="empty__title">No available orders</div>
-          <p className="empty__text">Orders will appear here for you to accept.</p>
-          <Button variant="outline" icon={<RefreshCw size={18} />} className="mt-32" onClick={() => void load()}>
-            REFRESH
-          </Button>
-        </div>
-      ) : (
-        <div className="stack" style={{ padding: '0 16px' }}>
-          {orders.map((order) => (
-            <OrderCard
-              key={order.id}
-              order={order}
-              headerLabel="READY FOR PICKUP"
-              headerColor={statusColor}
-              headerIcon={OrderStatusX.icon('ready_for_pickup')}
-              onOpen={() => navigate(`/home/orders/${order.id}`)}
-            >
-              <OrderRoute order={order} />
-              {order.items != null && order.items.length > 0 && <OrderItemsRow order={order} />}
-              <div className="order-card__footer">
-                <Button
-                  variant="primary"
-                  block
-                  disabled={!isVerified}
-                  style={{ background: statusColor, minHeight: 50, letterSpacing: '0.08em' }}
-                  onClick={() => navigate(`/home/orders/${order.id}`)}
-                >
-                  ACCEPT ORDER
-                </Button>
-              </div>
-            </OrderCard>
-          ))}
-        </div>
-      )}
-    </div>
+        {orders.length === 0 ? (
+          <EmptyState
+            title="No available orders"
+            message="Orders will appear here for you to accept."
+            icon={<MaterialCommunityIcons name="package-variant-closed" size={64} color={colors.textMuted} />}
+            action={
+              <Button
+                variant="outline"
+                icon={<MaterialCommunityIcons name="refresh" size={18} color={colors.secondary} />}
+                title="REFRESH"
+                onPress={() => void load()}
+              />
+            }
+          />
+        ) : (
+          <View style={styles.cards}>
+            {orders.map((order) => (
+              <OrderCard
+                key={order.id}
+                order={order}
+                headerLabel="READY FOR PICKUP"
+                headerColor={statusColor}
+                headerIcon={OrderStatusX.icon('ready_for_pickup')}
+                onPress={() => router.push(`/home/orders/${order.id}`)}
+              >
+                <OrderRoute order={order} />
+                {order.items != null && order.items.length > 0 && <OrderItemsRow order={order} />}
+                <View style={styles.cardFooter}>
+                  <Button
+                    variant="primary"
+                    block
+                    disabled={!isVerified}
+                    style={{ backgroundColor: statusColor, minHeight: 50 }}
+                    title="ACCEPT ORDER"
+                    onPress={() => router.push(`/home/orders/${order.id}`)}
+                  />
+                </View>
+              </OrderCard>
+            ))}
+          </View>
+        )}
+      </View>
+    </Screen>
   );
 };

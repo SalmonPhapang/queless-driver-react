@@ -1,51 +1,55 @@
-import { AlertTriangle, CheckCircle2, Info } from 'lucide-react';
+import React from 'react';
+import { Ionicons } from '@expo/vector-icons';
+import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useTheme } from '../theme/ThemeContext';
+import { typography } from '../theme/typography';
 import { useDialogStore } from '../stores/dialogStore';
-import { Modal } from './ui/Modal';
-import { Button } from './ui/Button';
 
-const ICON_CONFIG = {
-  success: { Icon: CheckCircle2, color: 'var(--success)', background: 'var(--success-soft)' },
-  info: { Icon: Info, color: 'var(--info)', background: 'var(--info-soft)' },
-  warning: { Icon: AlertTriangle, color: 'var(--warning)', background: 'var(--warning-soft)' },
-} as const;
-
-/** Host for UiService.showSuccessDialog — the app's themed modal. */
-export const DialogHost = () => {
+export function DialogHost() {
+  const { colors } = useTheme();
   const dialog = useDialogStore((state) => state.dialog);
   const close = useDialogStore((state) => state.close);
-
   if (!dialog) return null;
 
-  const { Icon, color, background } = ICON_CONFIG[dialog.icon ?? 'success'];
+  const icon =
+    dialog.icon === 'warning'
+      ? 'alert-circle'
+      : dialog.icon === 'info'
+        ? 'information-circle'
+        : 'check-circle';
+  const color =
+    dialog.icon === 'warning' ? colors.warning : dialog.icon === 'info' ? colors.info : colors.success;
 
   return (
     <Modal
-      dismissible={dialog.dismissible ?? false}
-      onClose={close}
-      icon={
-        <div
-          style={{
-            width: '100%',
-            height: '100%',
-            borderRadius: '50%',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            background,
-            color,
-          }}
-        >
-          <Icon size={30} />
-        </div>
-      }
-      title={dialog.title}
-      actions={
-        <Button variant="primary" onClick={close}>
-          {dialog.confirmLabel ?? 'OK'}
-        </Button>
-      }
+      visible
+      transparent
+      animationType="fade"
+      onRequestClose={() => {
+        if (dialog.dismissible) close();
+      }}
     >
-      <p>{dialog.message}</p>
+      <View style={styles.backdrop}>
+        <View style={[styles.dialog, { backgroundColor: colors.card, borderColor: colors.divider }]}>
+          <Ionicons name={icon as never} size={40} color={color} style={styles.icon} />
+          <Text style={[typography.titleLarge, styles.title, { color: colors.text }]}>{dialog.title}</Text>
+          <Text style={[typography.bodyMedium, styles.message, { color: colors.textMuted }]}>{dialog.message}</Text>
+          <Pressable onPress={close} style={[styles.button, { backgroundColor: colors.secondary }]}>
+            <Text style={[typography.labelLarge, { color: colors.onSecondary }]}>
+              {dialog.confirmLabel ?? 'OK'}
+            </Text>
+          </Pressable>
+        </View>
+      </View>
     </Modal>
   );
-};
+}
+
+const styles = StyleSheet.create({
+  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center', padding: 24 },
+  dialog: { width: '100%', borderWidth: 1, borderRadius: 24, padding: 24, alignItems: 'center' },
+  icon: { marginBottom: 12 },
+  title: { textAlign: 'center' },
+  message: { textAlign: 'center', marginTop: 8, marginBottom: 20 },
+  button: { minHeight: 48, borderRadius: 14, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 },
+});

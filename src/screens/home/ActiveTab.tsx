@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Bike, CircleHelp, Navigation, RefreshCw } from 'lucide-react';
-import { Button } from '../../components/ui/Button';
-import { StatusMessage } from '../../components/ui/StatusMessage';
-import { Spinner } from '../../components/ui/Spinner';
-import { errorMessage } from '../../lib/errors';
+import { Linking, StyleSheet, View } from 'react-native';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { router } from 'expo-router';
+import { Button } from '../../components/Button';
+import { EmptyState } from '../../components/EmptyState';
 import { OrderCard, OrderItemsRow, OrderRoute } from '../../components/OrderCard';
+import { Screen } from '../../components/Screen';
+import { Spinner } from '../../components/Spinner';
+import { StatusMessage } from '../../components/StatusMessage';
+import { errorMessage } from '../../lib/errors';
 import type { DeliveryOrder } from '../../models/deliveryOrder';
 import { OrderStatusX } from '../../models/statuses';
 import { BackgroundLocationService } from '../../services/backgroundLocationService';
@@ -14,19 +17,42 @@ import { LocationService } from '../../services/locationService';
 import { OrderService } from '../../services/orderService';
 import { UiService } from '../../services/uiService';
 import { useAuthStore } from '../../stores/authStore';
+import { useTheme } from '../../theme/ThemeContext';
 
-/** Web equivalent of `MapsLauncher.launchQuery`. */
+const styles = StyleSheet.create({
+  centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  content: { paddingBottom: 16 },
+  statusBlock: { marginBottom: 12, marginHorizontal: 16 },
+  cards: { paddingHorizontal: 16 },
+  footer: { paddingTop: 8, paddingHorizontal: 16, paddingBottom: 12 },
+  actionRow: { flexDirection: 'row', gap: 10 },
+  cta: { marginTop: 12 },
+});
+
 const launchMaps = (query: string): void => {
-  window.open(
-    `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`,
-    '_blank',
-    'noopener,noreferrer',
-  );
+  void Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(query)}`);
 };
+
+const StatusWithRetry = ({
+  title,
+  message,
+  onRetry,
+  style,
+}: {
+  title?: string;
+  message: string;
+  onRetry: () => void;
+  style?: object;
+}) => (
+  <View style={style}>
+    <StatusMessage variant="error" title={title ?? ''} message={message} />
+    <Button variant="outline" size="sm" title="Try again" onPress={onRetry} />
+  </View>
+);
 
 /** Port of lib/screens/home/tabs/active_tab.dart. */
 export const ActiveTab = () => {
-  const navigate = useNavigate();
+  const { colors } = useTheme();
   const user = useAuthStore((state) => state.user);
   const [orders, setOrders] = useState<DeliveryOrder[]>([]);
   const [loading, setLoading] = useState(true);
@@ -111,114 +137,128 @@ export const ActiveTab = () => {
 
   if (loading) {
     return (
-      <div className="loading-screen">
-        <Spinner />
-      </div>
+      <Screen padded={false} scroll={false}>
+        <View style={styles.centered}>
+          <Spinner />
+        </View>
+      </Screen>
     );
   }
 
   return (
-    <div style={{ paddingBottom: 16 }}>
-      {loadError && (
-        <StatusMessage
-          variant="error"
-          title="Could not load active orders"
-          message={loadError}
-          onRetry={() => void load()}
-        />
-      )}
+    <Screen padded={false} scroll={false}>
+      <View style={styles.content}>
+        {loadError && (
+          <StatusWithRetry
+            style={styles.statusBlock}
+            title="Could not load active orders"
+            message={loadError}
+            onRetry={() => void load()}
+          />
+        )}
 
-      {actionError && (
-        <StatusMessage
-          variant="error"
-          title="Could not update order"
-          message={actionError}
-          onDismiss={() => setActionError(null)}
-        />
-      )}
+        {actionError && (
+          <View style={styles.statusBlock}>
+            <StatusMessage
+              variant="error"
+              title="Could not update order"
+              message={actionError}
+              onDismiss={() => setActionError(null)}
+            />
+          </View>
+        )}
 
-      {orders.length === 0 ? (
-        <div className="empty" style={{ minHeight: '65vh' }}>
-          <div className="empty__icon">
-            <Bike size={64} />
-          </div>
-          <div className="empty__title">No active orders</div>
-          <p className="empty__text">Orders you accept will appear here.</p>
-          <Button variant="outline" icon={<RefreshCw size={18} />} className="mt-32" onClick={() => void load()}>
-            REFRESH
-          </Button>
-        </div>
-      ) : (
-        <div className="stack" style={{ padding: '0 16px' }}>
-          {orders.map((order) => {
-            const isAssigned = order.status === 'driver_assigned';
-            const isOutForDelivery = order.status === 'out_for_delivery';
-            const isArrived = order.status === 'arrived';
-            const isPickedUp = isOutForDelivery || isArrived;
-            const color = OrderStatusX.color(order.status);
-            const label = isArrived ? 'ARRIVED' : isOutForDelivery ? 'EN ROUTE' : 'DRIVER ASSIGNED';
+        {orders.length === 0 ? (
+          <EmptyState
+            title="No active orders"
+            message="Orders you accept will appear here."
+            icon={<MaterialCommunityIcons name="bike" size={64} color={colors.textMuted} />}
+            action={
+              <Button
+                variant="outline"
+                icon={<MaterialCommunityIcons name="refresh" size={18} color={colors.secondary} />}
+                title="REFRESH"
+                onPress={() => void load()}
+              />
+            }
+          />
+        ) : (
+          <View style={styles.cards}>
+            {orders.map((order) => {
+              const isAssigned = order.status === 'driver_assigned';
+              const isOutForDelivery = order.status === 'out_for_delivery';
+              const isArrived = order.status === 'arrived';
+              const isPickedUp = isOutForDelivery || isArrived;
+              const color = OrderStatusX.color(order.status);
+              const label = isArrived ? 'ARRIVED' : isOutForDelivery ? 'EN ROUTE' : 'DRIVER ASSIGNED';
 
-            return (
-              <OrderCard
-                key={order.id}
-                order={order}
-                headerLabel={label}
-                headerColor={color}
-                headerIcon={OrderStatusX.icon(order.status)}
-                onOpen={() => navigate(`/home/orders/${order.id}`)}
-              >
-                <OrderRoute
+              return (
+                <OrderCard
+                  key={order.id}
                   order={order}
-                  pickupDone={isPickedUp}
-                  pickupCompleted={isPickedUp}
-                  dropoffActive={isPickedUp}
-                />
-                {order.items != null && order.items.length > 0 && <OrderItemsRow order={order} showTotal={false} />}
-                <div className="order-card__footer" style={{ paddingTop: 8 }}>
-                  <div className="order-card__actions">
-                    <Button
-                      variant="outline"
-                      icon={<Navigation size={18} />}
-                      onClick={() => launchMaps(isPickedUp ? order.dropoffAddress : order.pickupAddress)}
-                    >
-                      NAV
-                    </Button>
-                    <Button
-                      variant="outline"
-                      icon={<CircleHelp size={18} />}
-                      onClick={() => navigate(`/home/orders/${order.id}`)}
-                    >
-                      INFO
-                    </Button>
-                  </div>
+                  headerLabel={label}
+                  headerColor={color}
+                  headerIcon={OrderStatusX.icon(order.status)}
+                  onPress={() => router.push(`/home/orders/${order.id}`)}
+                >
+                  <OrderRoute
+                    order={order}
+                    pickupDone={isPickedUp}
+                    pickupCompleted={isPickedUp}
+                    dropoffActive={isPickedUp}
+                  />
+                  {order.items != null && order.items.length > 0 && (
+                    <OrderItemsRow order={order} showTotal={false} />
+                  )}
+                  <View style={styles.footer}>
+                    <View style={styles.actionRow}>
+                      <Button
+                        variant="outline"
+                        icon={<MaterialCommunityIcons name="navigation" size={18} color={colors.secondary} />}
+                        title="NAV"
+                        onPress={() => launchMaps(isPickedUp ? order.dropoffAddress : order.pickupAddress)}
+                      />
+                      <Button
+                        variant="outline"
+                        icon={<MaterialCommunityIcons name="help-circle-outline" size={18} color={colors.secondary} />}
+                        title="INFO"
+                        onPress={() => router.push(`/home/orders/${order.id}`)}
+                      />
+                    </View>
 
-                  {isAssigned && (
-                    <Button variant="primary" block className="mt-12" style={{ minHeight: 50 }} onClick={() => void pickUp(order)}>
-                      PICK UP
-                    </Button>
-                  )}
-                  {isOutForDelivery && (
-                    <Button
-                      variant="primary"
-                      block
-                      className="mt-12"
-                      style={{ minHeight: 50, background: OrderStatusX.color('arrived') }}
-                      onClick={() => void markArrived(order)}
-                    >
-                      MARK AS ARRIVED
-                    </Button>
-                  )}
-                  {isArrived && (
-                    <Button variant="green" block className="mt-12" style={{ minHeight: 50 }} onClick={() => void markDelivered(order)}>
-                      MARK AS DELIVERED
-                    </Button>
-                  )}
-                </div>
-              </OrderCard>
-            );
-          })}
-        </div>
-      )}
-    </div>
+                    {isAssigned && (
+                      <View style={styles.cta}>
+                        <Button variant="primary" block title="PICK UP" onPress={() => void pickUp(order)} />
+                      </View>
+                    )}
+                    {isOutForDelivery && (
+                      <View style={styles.cta}>
+                        <Button
+                          variant="primary"
+                          block
+                          style={{ backgroundColor: OrderStatusX.color('arrived') }}
+                          title="MARK AS ARRIVED"
+                          onPress={() => void markArrived(order)}
+                        />
+                      </View>
+                    )}
+                    {isArrived && (
+                      <View style={styles.cta}>
+                        <Button
+                          variant="green"
+                          block
+                          title="MARK AS DELIVERED"
+                          onPress={() => void markDelivered(order)}
+                        />
+                      </View>
+                    )}
+                  </View>
+                </OrderCard>
+              );
+            })}
+          </View>
+        )}
+      </View>
+    </Screen>
   );
 };

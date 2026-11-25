@@ -1,19 +1,34 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Camera } from 'lucide-react';
-import { AppBar } from '../../components/ui/AppBar';
-import { Button } from '../../components/ui/Button';
-import { SelectField, TextField } from '../../components/ui/Field';
-import { Switch } from '../../components/ui/Switch';
+import { useMemo, useState } from 'react';
+import * as ImagePicker from 'expo-image-picker';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import { router } from 'expo-router';
+import {
+  Image,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+import { AppBar } from '../../components/AppBar';
+import { Button } from '../../components/Button';
+import { Input } from '../../components/Input';
+import { Screen } from '../../components/Screen';
+import { SelectField } from '../../components/SelectField';
+import { Switch } from '../../components/Switch';
+import { AppConfig } from '../../config/appConfig';
 import { errorMessage } from '../../lib/errors';
 import { initialsOf } from '../../lib/format';
+import type { PaystackBank } from '../../services/payoutService';
+import { PayoutService } from '../../services/payoutService';
 import { AuthService } from '../../services/authService';
 import { DriverService } from '../../services/driverService';
-import { PayoutService, type PaystackBank } from '../../services/payoutService';
 import { PushService } from '../../services/pushService';
 import { UiService } from '../../services/uiService';
 import { useAuthStore } from '../../stores/authStore';
-import { AppConfig } from '../../config/appConfig';
+import { useTheme } from '../../theme/ThemeContext';
+import { typography } from '../../theme/typography';
 
 const LOCATIONS = ['Sebokeng', 'Evaton', 'Orange Farm', 'Vanderbijlpark', 'Vereeniging'];
 const ACCOUNT_TYPES = ['Savings', 'Current', 'Business'];
@@ -28,14 +43,25 @@ const normalisePhone = (value: string): string => {
 };
 
 type Errors = Partial<
-  Record<'fullName' | 'contactNumber' | 'idNumber' | 'vehicleMake' | 'vehicleModel' | 'vehicleColor' | 'vehiclePlate' | 'bank' | 'accountHolder' | 'accountNumber', string>
+  Record<
+    | 'fullName'
+    | 'contactNumber'
+    | 'idNumber'
+    | 'vehicleMake'
+    | 'vehicleModel'
+    | 'vehicleColor'
+    | 'vehiclePlate'
+    | 'bank'
+    | 'accountHolder'
+    | 'accountNumber',
+    string
+  >
 >;
 
 /** Port of lib/screens/auth/driver_onboarding_screen.dart. */
 export const DriverOnboardingScreen = () => {
-  const navigate = useNavigate();
+  const { colors } = useTheme();
   const user = useAuthStore((state) => state.user);
-  const fileInput = useRef<HTMLInputElement>(null);
 
   const [fullName, setFullName] = useState('');
   const [contactNumber, setContactNumber] = useState('');
@@ -46,8 +72,8 @@ export const DriverOnboardingScreen = () => {
   const [vehiclePlate, setVehiclePlate] = useState('');
   const [vehicleType] = useState('car');
   const [location, setLocation] = useState('Sebokeng');
-  const [image, setImage] = useState<File | null>(null);
-  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [imageUri, setImageUri] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Errors>({});
 
@@ -57,16 +83,6 @@ export const DriverOnboardingScreen = () => {
   const [accountHolder, setAccountHolder] = useState('');
   const [accountNumber, setAccountNumber] = useState('');
   const [accountType, setAccountType] = useState('Savings');
-
-  useEffect(() => {
-    if (!image) {
-      setImagePreview(null);
-      return;
-    }
-    const url = URL.createObjectURL(image);
-    setImagePreview(url);
-    return () => URL.revokeObjectURL(url);
-  }, [image]);
 
   const loadBanks = async () => {
     try {
@@ -80,6 +96,30 @@ export const DriverOnboardingScreen = () => {
     () => banks.find((bank) => bank.code === selectedBankCode) ?? null,
     [banks, selectedBankCode],
   );
+
+  const pickImage = async (source: 'camera' | 'library') => {
+    setPickerOpen(false);
+    try {
+      const permission =
+        source === 'camera'
+          ? await ImagePicker.requestCameraPermissionsAsync()
+          : await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) return;
+
+      const result =
+        source === 'camera'
+          ? await ImagePicker.launchCameraAsync({ allowsEditing: true, aspect: [1, 1], quality: 0.8 })
+          : await ImagePicker.launchImageLibraryAsync({
+              mediaTypes: ['images'],
+              allowsEditing: true,
+              aspect: [1, 1],
+              quality: 0.8,
+            });
+      if (!result.canceled && result.assets[0]?.uri) setImageUri(result.assets[0].uri);
+    } catch (error) {
+      console.debug('Could not pick profile photo:', error);
+    }
+  };
 
   const validate = (): boolean => {
     const next: Errors = {};
@@ -106,8 +146,7 @@ export const DriverOnboardingScreen = () => {
     if (!user) return;
     if (!validate()) return;
 
-    // The Flutter screen uses the international phone input; entering
-    // 0821234567 on the ZA selector becomes +27821234567.
+    // Flutter's international phone input turns 0821234567 into +27821234567.
     const normalisedPhone = normalisePhone(contactNumber);
 
     // Flutter's extra safety check runs after FormState.validate()/save().
@@ -127,7 +166,7 @@ export const DriverOnboardingScreen = () => {
     setLoading(true);
     try {
       let imageUrl: string | undefined;
-      if (image) imageUrl = await DriverService.uploadProfileImage(user.id, image);
+      if (imageUri) imageUrl = await DriverService.uploadProfileImage(user.id, imageUri);
 
       await DriverService.saveProfile({
         id: user.id,
@@ -159,7 +198,8 @@ export const DriverOnboardingScreen = () => {
 
       if (AppConfig.featureFirebase) await PushService.registerDriver(user.id);
       await AuthService.refreshUser();
-      navigate('/', { replace: true });
+      // RootGate re-evaluates the whole gate once the profile exists.
+      router.replace('/');
     } catch (error) {
       UiService.showError(`Failed to save profile: ${errorMessage(error)}`);
     } finally {
@@ -168,167 +208,227 @@ export const DriverOnboardingScreen = () => {
   };
 
   return (
-    <div className="app-frame">
-      <div className="screen">
-        <AppBar title="Complete Your Profile" bordered />
-        <div className="screen-body screen-body--pad">
-          <div className="stack" style={{ maxWidth: 460, margin: '0 auto' }}>
-            <div className="center" style={{ paddingTop: 8 }}>
-              <div className="avatar-edit-wrap">
-                <button
-                  type="button"
-                  className="avatar avatar--xl"
-                  aria-label="Choose profile photo"
-                  onClick={() => fileInput.current?.click()}
-                  style={{ border: 0, cursor: 'pointer' }}
-                >
-                  {imagePreview ? (
-                    <img src={imagePreview} alt="Profile preview" />
-                  ) : (
-                    <span>{initialsOf(fullName)}</span>
-                  )}
-                </button>
-                <span className="avatar-edit">
-                  <Camera size={14} />
-                </span>
-              </div>
-              <input
-                ref={fileInput}
-                type="file"
-                accept="image/*"
-                className="sr-only"
-                onChange={(event) => {
-                  const file = event.target.files?.[0] ?? null;
-                  if (file) setImage(file);
-                  event.target.value = '';
-                }}
+    <Screen scroll={false} padded={false}>
+      <AppBar title="Complete Your Profile" />
+      <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
+        <View style={styles.form}>
+          <View style={styles.avatarBlock}>
+            <View>
+              <Pressable
+                accessibilityLabel="Choose profile photo"
+                onPress={() => setPickerOpen(true)}
+                style={[styles.avatar, { borderColor: colors.divider, backgroundColor: colors.surface }]}
+              >
+                {imageUri ? (
+                  <Image source={{ uri: imageUri }} style={styles.avatarImage} />
+                ) : (
+                  <Text style={[typography.headlineLarge, { color: colors.text }]}>
+                    {initialsOf(fullName)}
+                  </Text>
+                )}
+              </Pressable>
+              <View
+                style={[
+                  styles.cameraBadge,
+                  { backgroundColor: colors.accent, borderColor: colors.cardBackground },
+                ]}
+              >
+                <MaterialCommunityIcons name="camera" size={14} color={colors.onPrimary} />
+              </View>
+            </View>
+          </View>
+
+          <Input
+            label="Full Name"
+            value={fullName}
+            error={errors.fullName}
+            autoCapitalize="words"
+            onChangeText={setFullName}
+          />
+
+          <View style={styles.phoneRow}>
+            <Text style={[styles.phonePrefix, { color: colors.text }]}>+27</Text>
+            <View style={styles.phoneInput}>
+              <Input
+                label="Contact Number"
+                value={contactNumber}
+                error={errors.contactNumber}
+                keyboardType="phone-pad"
+                placeholder="082 123 4567"
+                onChangeText={setContactNumber}
               />
-            </div>
+            </View>
+          </View>
 
-            <TextField
-              label="Full Name"
-              value={fullName}
-              error={errors.fullName}
-              autoCapitalize="words"
-              onChange={(event) => setFullName(event.target.value)}
+          <Input
+            label="ID Number"
+            value={idNumber}
+            error={errors.idNumber}
+            keyboardType="numeric"
+            maxLength={13}
+            placeholder="13-digit ID number"
+            onChangeText={(value) => setIdNumber(value.slice(0, 13))}
+          />
+
+          <Input
+            label="Vehicle Make (e.g. Toyota)"
+            value={vehicleMake}
+            error={errors.vehicleMake}
+            onChangeText={setVehicleMake}
+          />
+
+          <Input
+            label="Vehicle Model (e.g. Corolla)"
+            value={vehicleModel}
+            error={errors.vehicleModel}
+            onChangeText={setVehicleModel}
+          />
+
+          <Input
+            label="Vehicle Color"
+            value={vehicleColor}
+            error={errors.vehicleColor}
+            onChangeText={setVehicleColor}
+          />
+
+          <Input
+            label="Vehicle Plate Number"
+            value={vehiclePlate}
+            error={errors.vehiclePlate}
+            autoCapitalize="characters"
+            onChangeText={(value) => setVehiclePlate(value.toUpperCase())}
+          />
+
+          <SelectField
+            label="Location"
+            value={location}
+            onChange={setLocation}
+            options={LOCATIONS.map((loc) => ({ value: loc, label: loc }))}
+          />
+
+          <View style={styles.bankToggle}>
+            <View style={styles.grow}>
+              <Text style={[typography.labelLarge, { color: colors.text }]}>
+                Add Bank Details Now
+              </Text>
+              <Text style={[typography.bodySmall, { color: colors.textMuted }]}>
+                Required for payouts
+              </Text>
+            </View>
+            <Switch
+              value={addBankDetails}
+              label="Add bank details now"
+              onValueChange={(value) => {
+                setAddBankDetails(value);
+                if (value && banks.length === 0) void loadBanks();
+              }}
             />
+          </View>
 
-            <TextField
-              label="Contact Number"
-              value={contactNumber}
-              error={errors.contactNumber}
-              type="tel"
-              inputMode="tel"
-              placeholder="082 123 4567"
-              icon={<span style={{ fontSize: 13, fontWeight: 700, paddingRight: 8 }}>+27</span>}
-              onChange={(event) => setContactNumber(event.target.value)}
-            />
-
-            <TextField
-              label="ID Number"
-              value={idNumber}
-              error={errors.idNumber}
-              inputMode="numeric"
-              maxLength={13}
-              placeholder="13-digit ID number"
-              onChange={(event) => setIdNumber(event.target.value.slice(0, 13))}
-            />
-
-            <TextField
-              label="Vehicle Make (e.g. Toyota)"
-              value={vehicleMake}
-              error={errors.vehicleMake}
-              onChange={(event) => setVehicleMake(event.target.value)}
-            />
-
-            <TextField
-              label="Vehicle Model (e.g. Corolla)"
-              value={vehicleModel}
-              error={errors.vehicleModel}
-              onChange={(event) => setVehicleModel(event.target.value)}
-            />
-
-            <TextField
-              label="Vehicle Color"
-              value={vehicleColor}
-              error={errors.vehicleColor}
-              onChange={(event) => setVehicleColor(event.target.value)}
-            />
-
-            <TextField
-              label="Vehicle Plate Number"
-              value={vehiclePlate}
-              error={errors.vehiclePlate}
-              autoCapitalize="characters"
-              onChange={(event) => setVehiclePlate(event.target.value.toUpperCase())}
-            />
-
-            <SelectField
-              label="Location"
-              value={location}
-              onChange={setLocation}
-              options={LOCATIONS.map((loc) => ({ value: loc, label: loc }))}
-            />
-
-            <div className="row-between" style={{ padding: '6px 0' }}>
-              <div>
-                <div className="label">Add Bank Details Now</div>
-                <div className="text-muted text-sm">Required for payouts</div>
-              </div>
-              <Switch
-                checked={addBankDetails}
-                label="Add bank details now"
-                onChange={(value) => {
-                  setAddBankDetails(value);
-                  if (value && banks.length === 0) void loadBanks();
-                }}
+          {addBankDetails && (
+            <>
+              <SelectField
+                label="Select Bank"
+                value={selectedBankCode}
+                error={errors.bank}
+                placeholder={banks.length === 0 ? 'Loading banks…' : 'Select a bank'}
+                onChange={setSelectedBankCode}
+                options={banks.map((bank) => ({ value: bank.code, label: bank.name }))}
               />
-            </div>
+              <Input
+                label="Account Holder Name"
+                value={accountHolder}
+                error={errors.accountHolder}
+                onChangeText={setAccountHolder}
+              />
+              <Input
+                label="Account Number"
+                value={accountNumber}
+                error={errors.accountNumber}
+                keyboardType="numeric"
+                onChangeText={(value) => setAccountNumber(value.replace(/\D/g, ''))}
+              />
+              <SelectField
+                label="Account Type"
+                value={accountType}
+                onChange={setAccountType}
+                options={ACCOUNT_TYPES.map((type) => ({ value: type, label: type }))}
+              />
+            </>
+          )}
 
-            {addBankDetails && (
-              <>
-                <SelectField
-                  label="Select Bank"
-                  value={selectedBankCode}
-                  error={errors.bank}
-                  placeholder={banks.length === 0 ? 'Loading banks…' : 'Select a bank'}
-                  onChange={setSelectedBankCode}
-                  options={banks.map((bank) => ({ value: bank.code, label: bank.name }))}
-                />
-                <TextField
-                  label="Account Holder Name"
-                  value={accountHolder}
-                  error={errors.accountHolder}
-                  onChange={(event) => setAccountHolder(event.target.value)}
-                />
-                <TextField
-                  label="Account Number"
-                  value={accountNumber}
-                  error={errors.accountNumber}
-                  inputMode="numeric"
-                  onChange={(event) => setAccountNumber(event.target.value.replace(/\D/g, ''))}
-                />
-                <SelectField
-                  label="Account Type"
-                  value={accountType}
-                  onChange={setAccountType}
-                  options={ACCOUNT_TYPES.map((type) => ({ value: type, label: type }))}
-                />
-              </>
-            )}
+          <Button
+            title="Complete Onboarding"
+            variant="green"
+            block
+            loading={loading}
+            onPress={() => void save()}
+          />
+        </View>
+      </ScrollView>
 
+      <Modal
+        visible={pickerOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setPickerOpen(false)}
+      >
+        <View style={styles.backdrop}>
+          <View style={[styles.sheet, { backgroundColor: colors.cardBackground }]}>
+            <Text style={[typography.titleLarge, styles.sheetTitle, { color: colors.text }]}>
+              Choose profile photo
+            </Text>
+            <Button title="Take Photo" variant="ghost" block onPress={() => void pickImage('camera')} />
             <Button
-              variant="green"
+              title="Choose from Library"
+              variant="ghost"
               block
-              loading={loading}
-              className="mt-16"
-              onClick={() => void save()}
-            >
-              Complete Onboarding
-            </Button>
-          </div>
-        </div>
-      </div>
-    </div>
+              onPress={() => void pickImage('library')}
+            />
+            <Button
+              title="Cancel"
+              variant="outline"
+              block
+              onPress={() => setPickerOpen(false)}
+            />
+          </View>
+        </View>
+      </Modal>
+    </Screen>
   );
 };
+
+const styles = StyleSheet.create({
+  body: { padding: 16, flexGrow: 1 },
+  form: { width: '100%', maxWidth: 460, alignSelf: 'center', gap: 16 },
+  avatarBlock: { alignItems: 'center', paddingTop: 8 },
+  avatar: {
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  avatarImage: { width: '100%', height: '100%' },
+  cameraBadge: {
+    position: 'absolute',
+    right: 0,
+    bottom: 0,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  phoneRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 4 },
+  phonePrefix: { ...typography.bodySmall, fontWeight: '700', paddingBottom: 14 },
+  phoneInput: { flex: 1 },
+  bankToggle: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 6 },
+  grow: { flex: 1 },
+  backdrop: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, backgroundColor: 'rgba(0,0,0,0.55)' },
+  sheet: { width: '100%', maxWidth: 360, borderRadius: 16, padding: 20, gap: 10 },
+  sheetTitle: { marginBottom: 6 },
+});

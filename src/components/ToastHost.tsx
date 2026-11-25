@@ -1,35 +1,43 @@
-import { createPortal } from 'react-dom';
-import { AlertCircle, CheckCircle2, Info, Loader2 } from 'lucide-react';
+import React from 'react';
+import { Ionicons } from '@expo/vector-icons';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useTheme } from '../theme/ThemeContext';
+import { typography } from '../theme/typography';
 import { useToastStore } from '../stores/toastStore';
 
-const ICONS = {
-  info: Info,
-  success: CheckCircle2,
-  error: AlertCircle,
-  loading: Loader2,
-} as const;
+export function ToastHost() {
+  const { colors } = useTheme();
+  const toast = useToastStore((state) => state.toasts[0]);
+  const dismiss = useToastStore((state) => state.dismiss);
+  if (!toast) return null;
 
-/** Renders UiService toasts (snackbars) above every screen. */
-export const ToastHost = () => {
-  const toasts = useToastStore((state) => state.toasts);
+  const background =
+    toast.kind === 'error'
+      ? colors.error
+      : toast.kind === 'success'
+        ? colors.success
+        : colors.primaryContainer;
+  const textColor = toast.kind === 'info' ? colors.text : colors.onPrimary;
 
-  if (toasts.length === 0) return null;
-
-  return createPortal(
-    <div className="toast-host" aria-live="polite">
-      {toasts.map((toast) => {
-        const Icon = ICONS[toast.kind];
-        return (
-          <div key={toast.id} className={`toast toast--${toast.kind}`}>
-            <Icon
-              size={17}
-              className={toast.kind === 'loading' ? 'toast__icon spinner-icon' : 'toast__icon'}
-            />
-            <span>{toast.message}</span>
-          </div>
-        );
-      })}
-    </div>,
-    document.body,
+  return (
+    <View style={styles.host} pointerEvents="box-none">
+      <View style={[styles.toast, { backgroundColor: background }]}>
+        {toast.kind === 'loading' ? (
+          <Ionicons name="sync" size={18} color={textColor} />
+        ) : null}
+        <Text style={[typography.bodyMedium, styles.message, { color: textColor }]}>{toast.message}</Text>
+        {toast.duration === 0 ? null : (
+          <Pressable onPress={() => dismiss(toast.id)} hitSlop={10}>
+            <Ionicons name="close" size={18} color={textColor} />
+          </Pressable>
+        )}
+      </View>
+    </View>
   );
-};
+}
+
+const styles = StyleSheet.create({
+  host: { position: 'absolute', left: 16, right: 16, bottom: 32, zIndex: 1000 },
+  toast: { borderRadius: 16, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  message: { flex: 1 },
+});

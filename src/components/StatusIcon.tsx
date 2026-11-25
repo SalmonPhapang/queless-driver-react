@@ -1,58 +1,52 @@
-import type { LucideIcon } from 'lucide-react';
-import {
-  AlertCircle,
-  Ban,
-  Banknote,
-  Bike,
-  CheckCircle2,
-  Circle,
-  CloudCheck,
-  CloudOff,
-  Coffee,
-  Hourglass,
-  Loader2,
-  MapPin,
-  Package,
-  Store,
-  Truck,
-  UserRound,
-  UtensilsCrossed,
-  XCircle,
-} from 'lucide-react';
+import React from 'react';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { StyleSheet } from 'react-native';
+import { useTheme } from '../theme/ThemeContext';
+import { OrderStatusX, type OrderStatus } from '../models/statuses';
 
-/**
- * Maps the icon names in `models/statuses.ts` (ported from Flutter's
- * IconData hints) onto lucide components.
- */
-const ICONS: Record<string, LucideIcon> = {
-  hourglass: Hourglass,
-  banknote: Banknote,
-  'banknote-x': Banknote,
-  store: Store,
-  utensils: UtensilsCrossed,
-  package: Package,
-  'user-pin': UserRound,
-  bike: Bike,
-  'map-pin': MapPin,
-  'check-circle': CheckCircle2,
-  'x-circle': XCircle,
-  ban: Ban,
-  'alert-circle': AlertCircle,
-  'cloud-off': CloudOff,
-  'cloud-check': CloudCheck,
-  coffee: Coffee,
-  loader: Loader2,
-  truck: Truck,
+const ICONS: Record<string, keyof typeof MaterialCommunityIcons.glyphMap> = {
+  hourglass: 'timer-sand',
+  banknote: 'cash',
+  'banknote-x': 'cash-remove',
+  store: 'store',
+  utensils: 'silverware-fork-knife',
+  package: 'package',
+  'user-pin': 'account',
+  bike: 'bike',
+  'map-pin': 'map-marker',
+  'check-circle': 'check-circle',
+  'x-circle': 'close-circle',
+  ban: 'cancel',
+  'alert-circle': 'alert-circle',
+  'cloud-off': 'cloud-off',
+  'cloud-check': 'cloud-check',
+  coffee: 'coffee',
+  loader: 'loading',
+  truck: 'truck',
 };
 
 interface StatusIconProps {
-  name: string;
+  name?: string;
+  status?: OrderStatus | string;
   size?: number;
-  className?: string;
-  strokeWidth?: number;
+  color?: string;
 }
 
-export const StatusIcon = ({ name, size = 18, className, strokeWidth = 2 }: StatusIconProps) => {
-  const Icon = ICONS[name] ?? Circle;
-  return <Icon size={size} className={className} strokeWidth={strokeWidth} />;
-};
+export function StatusIcon({ name, status, size = 18, color }: StatusIconProps) {
+  const { colors } = useTheme();
+  const resolved =
+    status != null
+      ? OrderStatusX.icon(status as OrderStatus)
+      : (name ?? 'circle');
+  const icon = (ICONS[resolved] ?? 'circle-outline') as keyof typeof MaterialCommunityIcons.glyphMap;
+  return (
+    <MaterialCommunityIcons
+      name={icon}
+      size={size}
+      color={color ?? colors.secondary}
+      style={styles.icon}
+    />
+  );
+}
+
+const styles = StyleSheet.create({ icon: { lineHeight: undefined } });

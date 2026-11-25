@@ -1,8 +1,6 @@
-// Web port of lib/services/shorebird_service.dart.
-//
-// Shorebird delivers over-the-air Dart code patches. A Vite build ships plain
-// JS/CSS assets, so the web equivalent is a normal redeploy; this module keeps
-// the original API (and its "unavailable on web" answer) for parity.
+// Shorebird is a Dart-only OTA patcher. The Expo driver uses the app-version
+// gate (VersionService) for mandatory updates, so this module exists only to
+// keep the original service API available to any ported call sites.
 
 export type UpdateStatus = 'upToDate' | 'outdated' | 'restartRequired' | 'unavailable';
 
@@ -17,11 +15,11 @@ export const ShorebirdService = {
   },
 
   get unavailabilityReason(): string {
-    return 'Shorebird is not supported on Web.';
+    return 'Shorebird patches are not available in the native Expo driver.';
   },
 
   async initialize(): Promise<void> {
-    // No-op on the web.
+    // No-op: VersionService owns update checks.
   },
 
   async checkForUpdate(): Promise<UpdateStatus> {
@@ -29,7 +27,7 @@ export const ShorebirdService = {
   },
 
   async update(): Promise<void> {
-    // No-op on the web.
+    // No-op: VersionService directs drivers to the app stores.
   },
 
   async getCurrentPatch(): Promise<Patch | null> {

@@ -1,38 +1,50 @@
-import { useNavigate } from 'react-router-dom';
-import { Bike } from 'lucide-react';
-import { Button } from '../../components/ui/Button';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import { router } from 'expo-router';
+import { StyleSheet, Text, View } from 'react-native';
+import { Button } from '../../components/Button';
+import { Screen } from '../../components/Screen';
+import { useTheme } from '../../theme/ThemeContext';
+import { typography } from '../../theme/typography';
 
 /** Port of lib/screens/auth/welcome_screen.dart. */
 export const WelcomeScreen = () => {
-  const navigate = useNavigate();
+  const { colors } = useTheme();
 
   return (
-    <div className="app-frame">
-      <div className="auth-screen" style={{ paddingTop: 72 }}>
-        <div>
-          <div className="auth-logo auth-logo--green">Queless</div>
-          <div className="auth-logo">Driver</div>
-        </div>
+    <Screen scroll={false} padded={false}>
+      <View style={styles.content}>
+        <View style={styles.logoBlock}>
+          <Text style={[styles.logo, { color: colors.success }]}>Queless</Text>
+          <Text style={[styles.logo, { color: colors.accent }]}>Driver</Text>
+        </View>
 
-        <p className="auth-tagline">
-          Deliver with speed.
-          <br />
-          Get paid on time.
-        </p>
+        <Text style={[styles.tagline, { color: colors.text }]}>
+          {'Deliver with speed.\nGet paid on time.'}
+        </Text>
 
-        <div className="auth-illustration">
-          <Bike size={100} strokeWidth={1.4} />
-        </div>
+        <View style={styles.illustration}>
+          <MaterialCommunityIcons name="bike" size={100} color={colors.accent} />
+        </View>
 
-        <div className="stack-sm">
-          <Button variant="primary" block onClick={() => navigate('/login')}>
-            Log in
-          </Button>
-          <Button variant="outline" block onClick={() => navigate('/signup')}>
-            Create account
-          </Button>
-        </div>
-      </div>
-    </div>
+        <View style={styles.actions}>
+          <Button title="Log in" variant="primary" block onPress={() => router.push('/login')} />
+          <Button
+            title="Create account"
+            variant="outline"
+            block
+            onPress={() => router.push('/signup')}
+          />
+        </View>
+      </View>
+    </Screen>
   );
 };
+
+const styles = StyleSheet.create({
+  content: { flex: 1, paddingTop: 72, paddingHorizontal: 24, justifyContent: 'space-between' },
+  logoBlock: { gap: 2 },
+  logo: { ...typography.displayLarge, fontWeight: '800' },
+  tagline: { ...typography.headlineMedium, lineHeight: 32, marginTop: 24 },
+  illustration: { alignItems: 'center', justifyContent: 'center', flex: 1 },
+  actions: { gap: 12, paddingBottom: 32 },
+});

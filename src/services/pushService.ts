@@ -1,26 +1,31 @@
-// Web port of lib/services/fcm_service.dart.
-//
-// The Flutter app uses Firebase Cloud Messaging + flutter_local_notifications.
-// The browser has no FCM device token without a Firebase web config, so this
-// service keeps every *observable* behaviour of the original and replaces the
-// native transport with the closest web equivalents:
-//
-//  * permission handling via the Notification API;
-//  * a stable per-install token written to `user_fcm_tokens` (so the server
-//    still has one row per device, and a future FCM-web/VAPID transport can
-//    reuse the same registration flow);
-//  * topic subscriptions persisted locally (FCM topics are native-only);
-//  * a realtime `notifications` subscription that raises a browser
-//    notification + sound for each new row — the in-browser equivalent of a
-//    foreground push;
-//  * the same 30-second ring/vibrate loop for new orders.
-//
-// See README "Platform parity" for what needs a native wrapper.
+// Native port of lib/services/fcm_service.dart.
+// Expo Push is the primary transport; native FCM tokens are mirrored for
+// server-side senders. Tokens are isolated by app_id = 'driver'.
 
+import * as Audio from 'expo-audio';
+import * as Haptics from 'expo-haptics';
+import * as Notifications from 'expo-notifications';
+import Constants from 'expo-constants';
+import { router } from 'expo-router';
+import { Platform } from 'react-native';
 import { SupabaseConfig } from '../config/supabaseClient';
 import { AppConfig } from '../config/appConfig';
-import { Prefs } from '../lib/storage';
-import { newDeviceUuid } from '../core/deviceBinding';
+import { Prefs, PrefKeys } from '../lib/storage';
+
+const NEW_ORDERS_CHANNEL = 'driver_new_orders';
+const ALERT_AUTO_STOP_MS = 30_000;
+const TOKEN_ATTEMPTS = 3;
+const APP_ID = 'driver';
+
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldShowBanner: true,
+    shouldShowList: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+  }),
+});
 
 export const PushTopics = {
   marketing: 'marketing',
@@ -29,7 +34,7 @@ export const PushTopics = {
 };
 
 export type PushAuthorization = 'authorized' | 'provisional' | 'denied' | 'notDetermined';
-
+export type PushProvider = 'expo' | 'fcm';
 export type PushRegistrationOutcome =
   | 'registered'
   | 'alreadyRegistered'
@@ -49,17 +54,22 @@ export interface PushRegistrationResult {
   error?: unknown;
 }
 
-const TOKEN_KEY = 'queless_push_token';
-const TOPICS_KEY = 'queless_push_topics';
+let initialized = false;
+let registeredUserId: string | null = null;
+let notificationChannel: { unsubscribe: () => void } | null = null;
+let alertTimer: ReturnType<typeof setTimeout> | null = null;
+let vibrationLoop: ReturnType<typeof setInterval> | null = null;
+let isAlerting = false;
+let sound: Audio.AudioPlayer | null = null;
+let lastAlertKey: string | null = null;
 
-const notificationSupported = (): boolean =>
-  typeof window !== 'undefined' && 'Notification' in window;
+const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 const readTopics = (): Set<string> => {
-  const raw = Prefs.getString(TOPICS_KEY);
+  const raw = Prefs.getString(PrefKeys.pushTopics);
   if (!raw) return new Set();
   try {
-    const parsed = JSON.parse(raw);
+    const parsed: unknown = JSON.parse(raw);
     return new Set(Array.isArray(parsed) ? parsed.map(String) : []);
   } catch {
     return new Set();
@@ -67,95 +77,100 @@ const readTopics = (): Set<string> => {
 };
 
 const writeTopics = (topics: Set<string>): void => {
-  Prefs.setString(TOPICS_KEY, JSON.stringify([...topics]));
+  Prefs.setString(PrefKeys.pushTopics, JSON.stringify([...topics]));
 };
 
-let registeredUserId: string | null = null;
-let initialized = false;
-let notificationChannel: { unsubscribe: () => void } | null = null;
-let alertTimer: number | null = null;
-let vibrationLoop: number | null = null;
-let isAlerting = false;
-let audioContext: AudioContext | null = null;
+type PermissionResponseWithIos = Notifications.PermissionResponse & {
+  ios?: { status?: Notifications.IosAuthorizationStatus };
+};
 
-const authorization = (): PushAuthorization => {
-  if (!notificationSupported()) return 'denied';
-  switch (Notification.permission) {
-    case 'granted':
-      return 'authorized';
-    case 'denied':
-      return 'denied';
-    default:
-      return 'notDetermined';
+const toAuthorization = (
+  permission: Notifications.PermissionResponse,
+): PushAuthorization => {
+  if (permission.granted) return 'authorized';
+  const ios = (permission as PermissionResponseWithIos).ios;
+  if (ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL) {
+    return 'provisional';
   }
+  if (permission.canAskAgain) return 'notDetermined';
+  return 'denied';
 };
 
 const allowsPush = (value: PushAuthorization): boolean =>
   value === 'authorized' || value === 'provisional';
 
-/** Stable per-install token, standing in for an FCM registration token. */
-const deviceToken = (): string => {
-  const existing = Prefs.getString(TOKEN_KEY);
-  if (existing) return existing;
-  const token = `web:${newDeviceUuid()}`;
-  Prefs.setString(TOKEN_KEY, token);
-  return token;
-};
-
-const playAlertTone = (): void => {
-  try {
-    audioContext ??= new AudioContext();
-    const ctx = audioContext;
-    if (ctx.state === 'suspended') void ctx.resume();
-    const oscillator = ctx.createOscillator();
-    const gain = ctx.createGain();
-    oscillator.type = 'square';
-    oscillator.frequency.value = 880;
-    gain.gain.value = 0.08;
-    oscillator.connect(gain).connect(ctx.destination);
-    oscillator.start();
-    oscillator.stop(ctx.currentTime + 0.35);
-  } catch {
-    // Autoplay policies can block audio until a user gesture; ignore.
+const payloadData = (data: unknown): Record<string, unknown> => {
+  if (!data || typeof data !== 'object') return {};
+  const payload = { ...(data as Record<string, unknown>) };
+  if (typeof payload.data === 'string') {
+    try {
+      const parsed: unknown = JSON.parse(payload.data);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        payload.data = parsed;
+      }
+    } catch {
+      // Keep raw value.
+    }
   }
+  return payload;
 };
 
-const vibratePattern = (): void => {
+const orderIdFromPayload = (payload: Record<string, unknown>): string | null => {
+  const nested = payloadData(payload.data);
+  const raw =
+    payload.order_id ??
+    payload.orderId ??
+    payload.id ??
+    nested.order_id ??
+    nested.orderId ??
+    nested.id;
+  return raw == null || raw === '' ? null : String(raw).trim();
+};
+
+const isNewOrderPayload = (payload: Record<string, unknown>): boolean => {
+  const type = String(payload.type ?? payload.event ?? '').toLowerCase();
+  const title = String(payload.title ?? '');
+  const body = String(payload.body ?? '');
+  return (
+    type.includes('new_order') ||
+    type.includes('order') ||
+    `${title} ${body}`.toLowerCase().includes('order')
+  );
+};
+
+const alertKey = (payload: Record<string, unknown>): string =>
+  [
+    String(payload.notificationId ?? ''),
+    String(payload.type ?? payload.event ?? ''),
+    String(orderIdFromPayload(payload) ?? ''),
+  ].join('|');
+
+const startAlert = (): void => {
+  if (isAlerting || !AppConfig.featureFirebase) return;
+  isAlerting = true;
+  void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => undefined);
   try {
-    navigator.vibrate?.([500, 200, 500]);
+    sound ??= Audio.createAudioPlayer(require('../../assets/sounds/order_alert.wav'));
+    sound.loop = true;
+    sound.seekTo(0);
+    sound.play();
   } catch {
-    // Unsupported.
+    // Alert feedback is best effort.
   }
+  vibrationLoop = setInterval(() => {
+    void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => undefined);
+  }, 2000);
+  alertTimer = setTimeout(() => PushService.stopNewOrderAlert(), ALERT_AUTO_STOP_MS);
 };
 
-const showNotification = (title: string, body: string, orderId?: string | null): void => {
-  if (!notificationSupported() || Notification.permission !== 'granted') return;
-  try {
-    const notification = new Notification(title, {
-      body,
-      icon: '/favicon.svg',
-      tag: orderId ? `order-${orderId}` : undefined,
-    });
-    notification.onclick = () => {
-      window.focus();
-      if (orderId) window.location.assign(`/home/orders/${orderId}`);
-      notification.close();
-    };
-  } catch {
-    // Some browsers only allow notifications from a service worker; ignore.
-  }
+const handleIncomingPayload = (payload: Record<string, unknown>): void => {
+  if (!isNewOrderPayload(payload)) return;
+  const key = alertKey(payload);
+  if (lastAlertKey === key) return;
+  lastAlertKey = key;
+  startAlert();
 };
 
-const isNewOrderNotification = (title: string, body: string, type?: string): boolean => {
-  const haystack = `${type ?? ''} ${title} ${body}`.toLowerCase();
-  return haystack.includes('order');
-};
-
-/**
- * Watches the durable `notifications` table for the signed-in driver and raises
- * a browser notification for each new row. This is the in-browser stand-in for
- * FCM foreground messages, and keeps the inbox and the alert in step.
- */
 const startNotificationBridge = (userId: string): void => {
   notificationChannel?.unsubscribe();
   let lastSeen = new Date().toISOString();
@@ -170,19 +185,18 @@ const startNotificationBridge = (userId: string): void => {
         table: 'notifications',
         filter: `user_id=eq.${userId}`,
       },
-      (payload) => {
-        const row = (payload.new ?? {}) as Record<string, unknown>;
+      (changes) => {
+        const row = (changes.new ?? {}) as Record<string, unknown>;
         const createdAt = String(row.created_at ?? '');
         if (createdAt && createdAt < lastSeen) return;
         lastSeen = createdAt || lastSeen;
-
-        const title = String(row.title ?? 'Queless Driver');
-        const body = String(row.body ?? '');
-        const type = row.type == null ? undefined : String(row.type);
-        showNotification(title, body, row.order_id == null ? null : String(row.order_id));
-        if (isNewOrderNotification(title, body, type)) {
-          PushService.startNewOrderAlert();
-        }
+        const payload = {
+          ...row,
+          title: String(row.title ?? 'Queless Driver'),
+          body: String(row.body ?? ''),
+          notificationId: String(row.id ?? ''),
+        };
+        handleIncomingPayload(payload);
       },
     )
     .subscribe();
@@ -194,6 +208,71 @@ const startNotificationBridge = (userId: string): void => {
   };
 };
 
+const fetchPushToken = async (): Promise<{ token: string; provider: PushProvider } | null> => {
+  try {
+    const projectId = Constants.expoConfig?.extra?.eas?.projectId as string | undefined;
+    const expoToken = await Notifications.getExpoPushTokenAsync(
+      projectId ? { projectId } : undefined,
+    );
+    const token = String(expoToken?.data ?? '').trim();
+    if (token) return { token, provider: 'expo' };
+  } catch (error) {
+    console.debug('[push] Expo token unavailable:', error);
+  }
+
+  if (Platform.OS !== 'android') return null;
+  try {
+    const deviceToken = await Notifications.getDevicePushTokenAsync();
+    const token = String(deviceToken?.data ?? '').trim();
+    return token ? { token, provider: 'fcm' } : null;
+  } catch (error) {
+    console.debug('[push] FCM token unavailable:', error);
+    return null;
+  }
+};
+
+const registerToken = async (
+  userId: string,
+  token: string,
+  provider: PushProvider,
+): Promise<unknown | null> => {
+  const previousToken = Prefs.getString(PrefKeys.pushToken);
+  if (previousToken && previousToken !== token) {
+    const { error } = await SupabaseConfig.client
+      .from('user_fcm_tokens')
+      .delete()
+      .eq('user_id', userId)
+      .eq('token', previousToken)
+      .eq('app_id', APP_ID);
+    if (error) console.debug('[push] Could not retire old token:', error.message);
+  }
+
+  const { error } = await SupabaseConfig.client.from('user_fcm_tokens').upsert(
+    {
+      user_id: userId,
+      token,
+      provider,
+      app_id: APP_ID,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'user_id,token' },
+  );
+  if (error) return error;
+
+  // Legacy column only understands native FCM tokens.
+  if (provider === 'fcm') {
+    const { error: mirrorError } = await SupabaseConfig.client
+      .from('users')
+      .update({ fcm_token: token })
+      .eq('id', userId);
+    if (mirrorError) console.debug('[push] Legacy token mirror failed:', mirrorError.message);
+  }
+
+  Prefs.setString(PrefKeys.pushToken, token);
+  Prefs.setString(PrefKeys.pushProvider, provider);
+  return null;
+};
+
 export const PushService = {
   driverTopics(userId: string): Set<string> {
     return new Set([PushTopics.driverOrdersReady, PushTopics.driver(userId)]);
@@ -202,20 +281,47 @@ export const PushService = {
   async initialize(): Promise<void> {
     if (initialized || !AppConfig.featureFirebase) return;
     initialized = true;
-    if (!notificationSupported()) return;
-    try {
-      if ('serviceWorker' in navigator) {
-        // Optional: enables notification clicks when a worker is present.
-        await navigator.serviceWorker.register('/sw.js').catch(() => undefined);
-      }
-    } catch (error) {
-      console.debug('Failed to initialize web push:', error);
+
+    await Promise.allSettled([
+      Notifications.setNotificationChannelAsync(NEW_ORDERS_CHANNEL, {
+        name: 'New Orders',
+        description: 'Notifications when a new order is offered or assigned',
+        importance: Notifications.AndroidImportance.MAX,
+        sound: 'default',
+        vibrationPattern: [0, 400, 200, 400, 200, 400],
+        lightColor: '#D13540',
+      }),
+    ]);
+
+    Notifications.addNotificationReceivedListener((notification) => {
+      handleIncomingPayload(payloadData(notification.request.content.data));
+    });
+
+    Notifications.addNotificationResponseReceivedListener((response) => {
+      void PushService.stopNewOrderAlert();
+      const payload = payloadData(response.notification.request.content.data);
+      const orderId = orderIdFromPayload(payload);
+      if (orderId) router.push(`/home/orders/${orderId}`);
+      else router.push('/home/active');
+    });
+
+    const last = await Notifications.getLastNotificationResponseAsync().catch(() => null);
+    if (last) {
+      const payload = payloadData(last.notification.request.content.data);
+      const orderId = orderIdFromPayload(payload);
+      if (orderId) router.push(`/home/orders/${orderId}`);
     }
+
+    Notifications.addPushTokenListener(() => {
+      const userId = registeredUserId ?? SupabaseConfig.currentUserId;
+      if (userId) void PushService.registerDriver(userId);
+    });
   },
 
   async notificationSettings(): Promise<PushAuthorization> {
+    if (!AppConfig.featureFirebase) return 'authorized';
     await PushService.initialize();
-    return authorization();
+    return toAuthorization(await Notifications.getPermissionsAsync());
   },
 
   async isAuthorized(): Promise<boolean> {
@@ -223,25 +329,14 @@ export const PushService = {
   },
 
   async requestPermission(): Promise<boolean> {
-    if (!AppConfig.featureFirebase) return true; // Assume granted if disabled
+    if (!AppConfig.featureFirebase) return true;
     await PushService.initialize();
-    if (!notificationSupported()) return false;
-    if (allowsPush(authorization())) return true;
-    try {
-      return (await Notification.requestPermission()) === 'granted';
-    } catch (error) {
-      console.debug('requesting notification permission failed:', error);
-      return false;
-    }
+    const current = await Notifications.getPermissionsAsync();
+    if (allowsPush(toAuthorization(current))) return true;
+    const requested = await Notifications.requestPermissionsAsync();
+    return allowsPush(toAuthorization(requested));
   },
 
-  /**
-   * Registers (or re-registers) this device for push for [userId].
-   *
-   * Called on every cold start — from `AuthService.restoreSession()` and from
-   * `RootRouter` — so a rotated token or dropped topic is restored without the
-   * driver signing in again. Repeat calls in the same session are cheap.
-   */
   async registerDriver(userId: string): Promise<PushRegistrationResult> {
     if (!AppConfig.featureFirebase) {
       return { outcome: 'unsupported', userId, authorization: 'notDetermined', topics: new Set() };
@@ -251,56 +346,66 @@ export const PushService = {
     }
 
     await PushService.initialize();
-
     if (registeredUserId === userId) {
       return {
         outcome: 'alreadyRegistered',
         userId,
-        authorization: authorization(),
+        authorization: await PushService.notificationSettings(),
         topics: PushService.driverTopics(userId),
       };
     }
 
     try {
-      const auth = authorization();
-      // Prompt only while the browser has no answer yet, matching the native
-      // registrar's `requestPermissionIfNeeded`.
-      const resolved = allowsPush(auth)
-        ? auth
-        : auth === 'notDetermined' && (await PushService.requestPermission())
-          ? 'authorized'
-          : auth;
-
-      const token = deviceToken();
-      if (!token) {
-        return { outcome: 'noToken', userId, authorization: resolved, topics: new Set() };
+      const granted = await PushService.requestPermission();
+      if (!granted) {
+        return {
+          outcome: 'permissionDenied',
+          userId,
+          authorization: 'denied',
+          topics: new Set(),
+        };
       }
 
-      // An unregistered device is never written while notifications are denied.
-      if (!allowsPush(resolved)) {
-        return { outcome: 'permissionDenied', userId, token, authorization: resolved, topics: new Set() };
+      let registration = await fetchPushToken();
+      for (let attempt = 1; !registration && attempt < TOKEN_ATTEMPTS; attempt++) {
+        await wait(attempt * 1000);
+        registration = await fetchPushToken();
+      }
+      if (!registration) {
+        return { outcome: 'noToken', userId, authorization: 'authorized', topics: new Set() };
       }
 
-      const { error } = await SupabaseConfig.client.from('user_fcm_tokens').upsert(
-        {
-          user_id: userId,
-          token,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: 'user_id,token' },
-      );
-      if (error) {
-        return { outcome: 'saveFailed', userId, token, authorization: resolved, topics: new Set(), error };
+      const saveError = await registerToken(userId, registration.token, registration.provider);
+      if (saveError) {
+        return {
+          outcome: 'saveFailed',
+          userId,
+          token: registration.token,
+          authorization: 'authorized',
+          topics: new Set(),
+          error: saveError,
+        };
       }
-
       registeredUserId = userId;
       const topics = await PushService.syncTopics(PushService.driverTopics(userId));
       startNotificationBridge(userId);
 
-      return { outcome: 'registered', userId, token, authorization: resolved, topics };
+      return {
+        outcome: 'registered',
+        userId,
+        token: registration.token,
+        authorization: 'authorized',
+        topics,
+      };
     } catch (error) {
-      console.debug('push registration failed:', error);
-      return { outcome: 'failed', userId, authorization: authorization(), topics: new Set(), error };
+      console.debug('[push] registration failed:', error);
+      return {
+        outcome: 'failed',
+        userId,
+        authorization: await PushService.notificationSettings(),
+        topics: new Set(),
+        error,
+      };
     }
   },
 
@@ -308,15 +413,31 @@ export const PushService = {
     const trimmed = topic.trim();
     if (!trimmed) return false;
     const topics = readTopics();
-    topics.add(trimmed);
-    writeTopics(topics);
+    if (!topics.has(trimmed)) {
+      try {
+        await Notifications.subscribeToTopicAsync(trimmed);
+        topics.add(trimmed);
+      } catch {
+        // Expo Go / non-FCM builds cannot subscribe; retain locally so a later
+        // native build can retry.
+        topics.add(trimmed);
+      }
+      writeTopics(topics);
+    }
     return true;
   },
 
   async unsubscribeFromTopic(topic: string): Promise<void> {
     const topics = readTopics();
-    topics.delete(topic.trim());
-    writeTopics(topics);
+    const trimmed = topic.trim();
+    if (topics.delete(trimmed)) {
+      try {
+        await Notifications.unsubscribeFromTopicAsync(trimmed);
+      } catch {
+        // Best effort.
+      }
+      writeTopics(topics);
+    }
   },
 
   async subscribeToDriverTopic(driverId: string): Promise<void> {
@@ -341,42 +462,71 @@ export const PushService = {
     return wanted;
   },
 
-  /** Drops every subscription this device is known to hold (sign-out). */
   async unsubscribeAll(): Promise<void> {
+    const stored = readTopics();
+    for (const topic of stored) {
+      try {
+        await Notifications.unsubscribeFromTopicAsync(topic);
+      } catch {
+        // Best effort.
+      }
+    }
     writeTopics(new Set());
     notificationChannel?.unsubscribe();
     notificationChannel = null;
     registeredUserId = null;
   },
 
+  async clearRegistration(userId: string): Promise<void> {
+    const token = Prefs.getString(PrefKeys.pushToken);
+    if (userId.trim() && token) {
+      const { error } = await SupabaseConfig.client
+        .from('user_fcm_tokens')
+        .delete()
+        .eq('user_id', userId)
+        .eq('token', token)
+        .eq('app_id', APP_ID);
+      if (error) console.debug('[push] Could not delete token:', error.message);
+    }
+    Prefs.remove(PrefKeys.pushToken);
+    Prefs.remove(PrefKeys.pushProvider);
+    registeredUserId = null;
+  },
+
   startNewOrderAlert(): void {
-    if (isAlerting) return;
-    isAlerting = true;
-    console.debug('Starting new order alert');
-
-    if (alertTimer != null) window.clearTimeout(alertTimer);
-    if (vibrationLoop != null) window.clearInterval(vibrationLoop);
-
-    playAlertTone();
-    vibratePattern();
-    vibrationLoop = window.setInterval(() => {
-      playAlertTone();
-      vibratePattern();
-    }, 2000);
-
-    // Stop alert after 30 seconds.
-    alertTimer = window.setTimeout(() => PushService.stopNewOrderAlert(), 30_000);
+    handleIncomingPayload({ type: 'new_order', notificationId: 'manual' });
   },
 
   stopNewOrderAlert(): void {
-    if (!isAlerting) return;
-    console.debug('Stopping new order alert');
-    isAlerting = false;
-    if (alertTimer != null) window.clearTimeout(alertTimer);
-    if (vibrationLoop != null) window.clearInterval(vibrationLoop);
+    if (alertTimer) clearTimeout(alertTimer);
+    if (vibrationLoop) clearInterval(vibrationLoop);
     alertTimer = null;
     vibrationLoop = null;
+    isAlerting = false;
+    try {
+      if (sound) {
+        if (sound.playing) sound.pause();
+        sound.loop = false;
+        sound.seekTo(0);
+      }
+    } catch {
+      // Best effort.
+    }
   },
 
-  showNotification,
+  async showNotification(
+    title: string,
+    body: string,
+    orderId?: string | null,
+  ): Promise<void> {
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title,
+        body,
+        sound: true,
+        data: orderId ? { order_id: orderId, type: 'order' } : { type: 'order' },
+      },
+      trigger: Platform.OS === 'android' ? { channelId: NEW_ORDERS_CHANNEL } : null,
+    });
+  },
 };

@@ -1,53 +1,35 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import {
-  Bell,
-  Bike,
-  CheckCheck,
-  CircleCheck,
-  Hash,
-  ReceiptText,
-  Truck,
-  XCircle,
-} from 'lucide-react';
-import { AppBar } from '../../components/ui/AppBar';
-import { Spinner } from '../../components/ui/Spinner';
-import { cn } from '../../lib/cn';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { router } from 'expo-router';
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import { AppBar } from '../../components/AppBar';
+import { Button } from '../../components/Button';
+import { EmptyState } from '../../components/EmptyState';
+import { Screen } from '../../components/Screen';
+import { Spinner } from '../../components/Spinner';
 import type { UserNotification } from '../../models/userNotification';
 import { UserNotificationModel } from '../../models/userNotification';
 import { NotificationInboxService } from '../../services/notificationInboxService';
+import { useTheme } from '../../theme/ThemeContext';
+import { typography } from '../../theme/typography';
 
-const iconFor = (type: string) => {
+type IconName = React.ComponentProps<typeof MaterialCommunityIcons>['name'];
+
+const iconFor = (type: string): IconName => {
   switch (type) {
     case 'order_assigned':
-      return Truck;
+      return 'truck-outline';
     case 'order_cancelled':
     case 'order_rejected':
-      return XCircle;
+      return 'close-circle-outline';
     case 'order_ready_for_pickup':
-      return ReceiptText;
+      return 'receipt-text-outline';
     case 'order_delivered':
-      return CircleCheck;
+      return 'check-circle-outline';
     case 'new_order':
-      return Bike;
+      return 'bike';
     default:
-      return Bell;
-  }
-};
-
-const colourFor = (type: string): string => {
-  switch (type) {
-    case 'order_assigned':
-      return '#0f766e';
-    case 'order_cancelled':
-    case 'order_rejected':
-      return '#ef4444';
-    case 'order_ready_for_pickup':
-      return '#b45309';
-    case 'order_delivered':
-      return '#15803d';
-    default:
-      return 'var(--primary)';
+      return 'bell-outline';
   }
 };
 
@@ -67,7 +49,7 @@ const timeLabel = (createdAt: string | Date): string => {
 
 /** Port of lib/screens/notifications/notification_inbox_screen.dart. */
 export const NotificationInboxScreen = () => {
-  const navigate = useNavigate();
+  const { colors } = useTheme();
   const [notifications, setNotifications] = useState<UserNotification[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -103,7 +85,7 @@ export const NotificationInboxScreen = () => {
     // Flutter passes the freshly fetched order into details with its default
     // `isVerified: true`; the route fetch below does the equivalent without
     // letting a pending profile row disable the accept button.
-    navigate(`/home/orders/${notification.orderId}`, { state: { fromNotification: true } });
+    router.push(`/home/orders/${notification.orderId}?fromNotification=true`);
   };
 
   const markAllRead = async () => {
@@ -113,89 +95,178 @@ export const NotificationInboxScreen = () => {
 
   const hasUnread = notifications.some((row) => !row.isRead);
 
+  const colourFor = (type: string): string => {
+    switch (type) {
+      case 'order_assigned':
+        return colors.info;
+      case 'order_cancelled':
+      case 'order_rejected':
+        return colors.error;
+      case 'order_ready_for_pickup':
+        return colors.warning;
+      case 'order_delivered':
+        return colors.success;
+      default:
+        return colors.primary;
+    }
+  };
+
   return (
-    <div className="app-frame">
-      <div className="screen">
-        <AppBar
-          title="Notifications"
-          back
-          actions={
-            hasUnread ? (
-              <button
-                type="button"
-                className="btn btn--ghost btn--sm"
-                onClick={() => void markAllRead()}
-                disabled={refreshing}
-              >
-                <CheckCheck size={18} />
-                Mark all read
-              </button>
-            ) : undefined
-          }
-        />
-
-        <div className="screen-body">
-          {loading ? (
-            <div className="loading-screen">
-              <Spinner />
-            </div>
-          ) : notifications.length === 0 ? (
-            <div className="empty">
-              <div className="empty__icon">
-                <Bell size={64} strokeWidth={1.5} />
-              </div>
-              <div className="empty__title">No notifications yet</div>
-              <p className="empty__text">
-                New order assignments and updates will appear here.
-              </p>
-            </div>
-          ) : (
-            <div style={{ padding: '8px 0' }}>
-              {notifications.map((notification) => {
-                const Icon = iconFor(notification.type);
-                const colour = colourFor(notification.type);
-                return (
-                  <button
-                    key={notification.id}
-                    type="button"
-                    className={cn(
-                      'notification-item',
-                      notification.isRead && 'notification-item--read',
+    <Screen>
+      <AppBar
+        title="Notifications"
+        onBack={() => router.back()}
+        right={
+          hasUnread ? (
+            <Button
+              title="Mark all read"
+              variant="ghost"
+              size="sm"
+              icon={<MaterialCommunityIcons name="check-all" size={18} color={colors.primary} />}
+              disabled={refreshing}
+              onPress={() => void markAllRead()}
+            />
+          ) : undefined
+        }
+      />
+      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        {loading ? (
+          <View style={styles.center}>
+            <Spinner />
+          </View>
+        ) : notifications.length === 0 ? (
+          <EmptyState
+            title="No notifications yet"
+            message="New order assignments and updates will appear here."
+            icon={<MaterialCommunityIcons name="bell-outline" size={64} color={colors.textMuted} />}
+          />
+        ) : (
+          <View style={styles.list}>
+            {notifications.map((notification) => {
+              const colour = colourFor(notification.type);
+              return (
+                <TouchableOpacity
+                  key={notification.id}
+                  style={[
+                    styles.item,
+                    {
+                      backgroundColor: colors.card,
+                      borderColor: colors.divider,
+                      opacity: notification.isRead ? 0.72 : 1,
+                    },
+                  ]}
+                  onPress={() => void open(notification)}
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.iconWrap}>
+                    <View style={[styles.icon, { backgroundColor: colors.divider }]}>
+                      <MaterialCommunityIcons
+                        name={iconFor(notification.type)}
+                        size={20}
+                        color={colour}
+                      />
+                    </View>
+                    {!notification.isRead && (
+                      <View style={[styles.unreadDot, { backgroundColor: colors.primary }]} />
                     )}
-                    onClick={() => void open(notification)}
-                  >
-                    <span className="notification-item__icon-wrap">
-                      <span
-                        className="notification-item__icon"
-                        style={{ background: `color-mix(in srgb, ${colour} 12%, transparent)`, color: colour }}
-                      >
-                        <Icon size={20} />
-                      </span>
-                      {!notification.isRead && <span className="notification-item__dot" />}
-                    </span>
+                  </View>
 
-                    <span className="grow">
-                      <span className="row-between" style={{ alignItems: 'flex-start' }}>
-                        <span className="notification-item__title grow">{notification.title}</span>
-                        <span className="notification-item__time">{timeLabel(notification.createdAt)}</span>
-                      </span>
-                      <span className="notification-item__body" style={{ display: 'block' }}>
-                        {notification.body}
-                      </span>
-                      {notification.orderNumber && (
-                        <span className="notification-item__order">
-                          <Hash size={13} />
-                          Order #{notification.orderNumber}
-                        </span>
-                      )}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
+                  <View style={styles.grow}>
+                    <View style={styles.itemHeader}>
+                      <Text style={[typography.labelLarge, styles.title, { color: colors.text }]}>
+                        {notification.title}
+                      </Text>
+                      <Text style={[typography.caption, styles.time, { color: colors.textMuted }]}>
+                        {timeLabel(notification.createdAt)}
+                      </Text>
+                    </View>
+                    <Text style={[typography.bodySmall, styles.body, { color: colors.textMuted }]}>
+                      {notification.body}
+                    </Text>
+                    {notification.orderNumber && (
+                      <View style={styles.orderRow}>
+                        <MaterialCommunityIcons name="pound" size={13} color={colors.textMuted} />
+                        <Text style={[typography.caption, { color: colors.textMuted }]}>
+                          {`Order #${notification.orderNumber}`}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        )}
+      </ScrollView>
+    </Screen>
   );
 };
+
+const styles = StyleSheet.create({
+  content: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+  },
+  center: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 24,
+  },
+  list: {
+    gap: 8,
+  },
+  item: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  iconWrap: {
+    position: 'relative',
+  },
+  icon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  unreadDot: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    width: 9,
+    height: 9,
+    borderRadius: 5,
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  grow: {
+    flex: 1,
+  },
+  itemHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  title: {
+    flex: 1,
+    fontWeight: '700',
+  },
+  time: {
+    flexShrink: 0,
+  },
+  body: {
+    marginTop: 4,
+  },
+  orderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 8,
+  },
+});

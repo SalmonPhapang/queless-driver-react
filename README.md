@@ -1,126 +1,100 @@
-# queless-driver-react
+# Queless Driver (native)
 
-React + TypeScript port of the Queless **driver** Flutter app
-([queless_driver](https://github.com/SalmonPhapang/queless_driver.git)).
+This repository is the native **Queless Driver** app. There is no web version: the
+temporary Vite port was removed, the Expo config targets only iOS and Android,
+and the app lives at the repository root.
 
-The goal of this port is behavioural parity: every service, model, auth gate,
-order lifecycle transition, payout query, notification flow, device-binding
-challenge and screen from the Flutter app is represented here. The UI is
-rebuilt with the same Material 3 palette and copy, using plain CSS (no UI
-framework) so the bundle stays small.
+The behavioral contract against the original Flutter app and the retired web
+port stays in [`PORTING.md`](PORTING.md).
 
 ## Stack
 
-| Concern | Flutter original | React port |
-| --- | --- | --- |
-| Framework | Flutter / Dart | Vite + React 19 + TypeScript |
-| Routing | `Navigator` + named routes | `react-router-dom` |
-| State | `ChangeNotifier` + `provider` | `zustand` stores |
-| Persistence | `shared_preferences` | `localStorage` (`src/lib/storage.ts`) |
-| Backend | `supabase_flutter` | `@supabase/supabase-js` |
-| Icons | Material Icons | `lucide-react` |
-| Fonts | Google Fonts (Plus Jakarta Sans) | same, via Google Fonts CDN |
+| Concern | Implementation |
+| --- | --- |
+| Framework | Expo SDK 58 + React Native 0.88 + React 19 + TypeScript |
+| Routing | Expo Router (`app/`) |
+| State | `zustand` stores |
+| Persistence | `@react-native-async-storage/async-storage` (`src/lib/storage.ts`) |
+| Backend | `@supabase/supabase-js` |
+| Core models/statuses/theme | `@queless/core@^0.1.0` from npm |
+| Fonts | Plus Jakarta Sans 400/600/700/800, bundled locally |
+| Icons | `@expo/vector-icons` |
+| Notifications/location | Expo notifications + TaskManager background location |
+| Crash reporting | Sentry (`queless-driver-mobile`), errors + tracing only |
 
 ## Getting started
 
 ```bash
-cp .env.example .env      # fill in VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY
-npm install
-npm run dev
+cp .env.example .env       # fill in EXPO_PUBLIC_SUPABASE_ANON_KEY
+npm install                # use npm.cmd on Windows if scripts are restricted
+npm run start              # Expo dev client
 ```
 
-PowerShell note: if script execution is restricted, use `npm.cmd run dev` and
-`npx.cmd …`.
+Native builds require a development client. The EAS project is
+`@developers_sourcecodes/queless-driver-mobile`
+(ID `ccc4dfcb-0bbc-4d1e-8ae4-a69572cddf88`).
 
-Scripts: `dev`, `build` (`tsc -b && vite build`), `preview`, `lint` (oxlint).
+Scripts (run from the repository root):
+
+- `npm run start` — Expo dev server with dev client
+- `npm run ios` / `npm run android` — local native run
+- `npm run typecheck` — TypeScript check
+- `npx expo export --platform ios|android` — production JS bundle check
+- `npm run sourcemaps:upload` — export iOS/Android bundles and upload source maps
 
 ## Environment
 
+Only public values belong in Expo env vars. Paystack secret keys and the Sentry
+auth token must never be `EXPO_PUBLIC_*`.
+
 | Variable | Purpose |
 | --- | --- |
-| `VITE_SUPABASE_URL` | Supabase project URL (required) |
-| `VITE_SUPABASE_ANON_KEY` | Supabase anon key (required) |
-| `VITE_APP_ENV` | `dev` / `stage` / `prod` |
-| `VITE_ENABLE_DEVICE_BINDING` | Dev-only override of the server device-binding policy |
-| `VITE_PAYSTACK_SUBACCOUNT_PERCENTAGE_CHARGE` | Share retained by Queless on driver subaccounts |
-| `VITE_APP_VERSION` | Displayed version, mirrors `PackageInfo.version` |
-| `VITE_APP_BUILD_NUMBER` | Update-check build number, mirrors `PackageInfo.buildNumber` |
+| `EXPO_PUBLIC_SUPABASE_URL` | Supabase project URL (required) |
+| `EXPO_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon key (required) |
+| `EXPO_PUBLIC_APP_ENV` | `dev` / `stage` / `prod` |
+| `EXPO_PUBLIC_ENABLE_DEVICE_BINDING` | Dev-only override of the server device-binding policy |
+| `EXPO_PUBLIC_PAYSTACK_SUBACCOUNT_PERCENTAGE_CHARGE` | Queless share on driver subaccounts (0) |
+
+Sentry source maps/debug symbols need `SENTRY_AUTH_TOKEN` (org scope `org:ci`)
+in EAS secrets for `production`, `preview`, and `development`. Native EAS builds
+upload them automatically through the Sentry Expo plugin; for manual
+EAS Update/export uploads, pull the token locally and run
+`npm run sourcemaps:upload`.
+
+## Behaviors preserved
+
+- Forced SMS device verification before `/home`; no deep link or notification tap
+  can bypass a pending challenge.
+- 30-second offer alert/timeout, next-driver dispatch, and the full
+  `out_for_delivery` → `arrived` → `delivered` flow.
+- Live location published from the native background task to
+  `driver_assignments` and mirrored to `driver_locations`.
+- Runs edge-to-edge: the Android navigation bar and status bar are hidden while
+  the app is open, and the iOS status bar is hidden.
+- Driver notifications use `app_id: driver` with real `ios`/`android` platform
+  and OS version; topics are `DRIVER_ORDERS_READY`, `driver-<driverId>`, and
+  `marketing`.
+- Earnings use the internal `driver_payments` ledger and Paystack transfers,
+  with bank-details validation and Tuesday/Thursday payout batching.
+- Customer theme: Plus Jakarta Sans, neutral light/dark surfaces, crimson
+  `#D13540`, inline errors, and no browser APIs or web alerts.
 
 ## Structure
 
-```
+```text
+app/                   Expo Router routes and route guards
+assets/                icon, splash, alert sound
 src/
-  components/        shared UI (design-system primitives + app-wide hosts)
-  config/            AppConfig, Supabase client/edge client, telemetry
-  core/              edge client, device-binding protocol
-  lib/               storage, formatting, geo, class-name helper
-  models/            statuses, orders, drivers, assignments, notifications, versions
-  screens/
-    auth/            welcome, login, signup, onboarding, permissions, success screens
-    home/            tabs, order details, wallet
-    notifications/   durable inbox
-  services/          auth, driver, orders, payouts, location, push, version, …
-  stores/            auth, theme, toast, dialog
+  components/          native design-system primitives and hosts
+  config/              app/Supabase configuration
+  core/                device-binding protocol
+  lib/                 storage, formatting, geo, errors
+  models/              shared/core model re-exports
+  screens/             auth, home, notification screens
+  services/            auth, orders, location, push, payouts, version
+  stores/              auth, theme, toast, dialog, update state
+  theme/               colors, typography, fonts, ThemeProvider
+NATIVE_CONTRACT.md     shared imports and route/copy contract
 ```
 
-`PORTING.md` documents the design-system classes and service contracts used by
-the screen ports.
-
-## Authentication & routing gates
-
-`src/screens/RootGate.tsx` reproduces `RootRouter` from `lib/main.dart` in the
-same order:
-
-1. restore session (device-binding check on cold start);
-2. inactive driver → blocked screen with logout;
-3. missing `full_name` → `/onboarding`;
-4. not verified → `/registration-success` (first time) → `/permissions` → home;
-5. verified → `/approval-success` (first time) → `/permissions` → home.
-
-Login additionally runs the SMS device challenge (`ensureVerified`) before the
-session is let through, exactly like the Flutter login screen.
-
-## Platform parity notes (web adaptations)
-
-These Flutter capabilities have no direct browser equivalent. Each service
-keeps the original public API and substitutes the closest durable behaviour:
-
-| Flutter | Web port | Notes |
-| --- | --- | --- |
-| `flutter_local_notifications` + FCM | Web Notifications + realtime `notifications` subscription | `PushService`; stores a stable per-install token in `user_fcm_tokens`, keeps topic subscriptions locally, sounds/vibrates for new orders. A native wrapper is required for true background push. |
-| Android foreground location service | `navigator.geolocation.watchPosition` | Publishing stops when the tab is closed; 10 m filter and 3 s throttle preserved. |
-| Battery-optimisation exemption | no-op that reports exempt | `BatteryService`; browsers have no equivalent. |
-| Shorebird OTA | redeploy assets | `ShorebirdService` reports `unavailable` on web. |
-| `PackageInfo` | `VITE_APP_VERSION` / `VITE_APP_BUILD_NUMBER` | Drives the same `app_versions` update check and forced-update dialog. |
-| Image picker (gallery/camera) | `<input type="file" accept="image/*">` | Upload path/bucket unchanged (`driver/${userId}_${Date.now()}.png`). |
-| Vibrate / native alert | Web Audio tone + `navigator.vibrate` where supported | Same 30-second new-order alert loop. |
-| Deep link to location settings | browser site-settings instructions | `LocationService.openLocationSettings`. |
-| `RefreshIndicator` pull-to-refresh | reload on tab entry / resume | Lists have no extra refresh chrome; empty states keep their REFRESH button. The browser pull gesture does not trigger a reload. |
-| `PopScope(canPop: false)` forced dialogs | Escape/backdrop blocked | Browser Back cannot be reliably intercepted; forced update and device-challenge dialogs still reject Escape and backdrop taps. |
-
-## Backend contract used
-
-- Edge functions: `orders-status`, `paystack-settlements`
-  (`get_banks`, `settlement_data`, `settled_refs`, `create_recipient`,
-  `create_subaccount`, `update_subaccount`), `driver-device-verify`
-  (`check`, `send_otp`, `verify_otp`).
-- RPCs: `accept_dispatch_offer(p_assignment_id)`,
-  `decline_dispatch_offer(p_assignment_id, p_reason?)`.
-- Tables: `orders`, `driver_assignments`, `drivers`, `users`,
-  `driver_payments`, `driver_locations`, `notifications`, `payments`,
-  `app_settings`, `app_versions`, `edge_call_events`, `user_fcm_tokens`.
-- Storage bucket: `driver`.
-
-Driver-facing ids are always the Supabase **auth user id** (`drivers.user_id`);
-`driver_assignments.driver_id` references `auth.users(id)`.
-
-## Deployment
-
-Any static host works. For SPA routing, rewrite unknown paths to `index.html`.
-On Vercel:
-
-```json
-{ "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }] }
-```
-
-Set the `VITE_*` variables in the project environment before building.
+`PORTING.md` documents the original design-system and service contracts.

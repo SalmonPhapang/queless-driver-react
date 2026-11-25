@@ -1,13 +1,9 @@
-// Port of lib/services/location_service.dart using the browser Geolocation API.
-//
-// Behavioural parity notes:
-//  * `requestPermission` resolves through a real position request (the only
-//    cross-browser way to prompt);
-//  * "denied forever" is the browser's `denied` permission state;
-//  * the 3 s publish throttle and Haversine helper are unchanged;
-//  * the foreground service is still only started when the driver marks the
-//    order picked up — see BackgroundLocationService.
+// Native port of lib/services/location_service.dart using expo-location.
+// The foreground service is still only started when the driver marks the
+// order picked up — see BackgroundLocationService.
 
+import * as Location from 'expo-location';
+import { Linking, Platform } from 'react-native';
 import { BackgroundLocationService } from './backgroundLocationService';
 import { OrderService } from './orderService';
 import { calculateDistance } from '../lib/geo';
@@ -20,54 +16,37 @@ export interface DriverGeoPosition {
   heading: number | null;
 }
 
-/** Browsers expose no per-site settings deep link, so screens show this inline. */
 export const LOCATION_SETTINGS_HELP =
-  'To change location access, open your browser site settings for this page and allow Location.';
+  Platform.OS === 'android'
+    ? 'Open your device Settings, then allow Queless Driver to use Location.'
+    : 'Open your device Settings, then allow Queless Driver to use Location Services.';
 
 let trackedDriverId: string | null = null;
 let trackedOrderIds: string[] = [];
 let lastPublishedAt: number | null = null;
 
-const geolocation = (): Geolocation | null =>
-  typeof navigator !== 'undefined' && 'geolocation' in navigator ? navigator.geolocation : null;
+const toPosition = (location: Location.LocationObject): DriverGeoPosition => ({
+  latitude: location.coords.latitude,
+  longitude: location.coords.longitude,
+  accuracy: location.coords.accuracy ?? null,
+  speed: location.coords.speed ?? null,
+  heading: location.coords.heading ?? null,
+});
 
-const permissionState = async (): Promise<PermissionState | null> => {
+const readPosition = async (): Promise<DriverGeoPosition | null> => {
   try {
-    if (!navigator.permissions) return null;
-    const status = await navigator.permissions.query({ name: 'geolocation' });
-    return status.state;
-  } catch {
+    const location = await Location.getCurrentPositionAsync({
+      accuracy: Location.Accuracy.High,
+    });
+    return toPosition(location);
+  } catch (error) {
+    console.debug('Location error:', error);
     return null;
   }
 };
 
-const readPosition = (options: PositionOptions): Promise<DriverGeoPosition | null> =>
-  new Promise((resolve) => {
-    const geo = geolocation();
-    if (!geo) {
-      resolve(null);
-      return;
-    }
-    geo.getCurrentPosition(
-      (position) =>
-        resolve({
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-          accuracy: Number.isFinite(position.coords.accuracy) ? position.coords.accuracy : null,
-          speed: position.coords.speed,
-          heading: position.coords.heading,
-        }),
-      (error) => {
-        console.debug('Geolocation error:', error);
-        resolve(null);
-      },
-      options,
-    );
-  });
-
 const publishPosition = async (position: DriverGeoPosition): Promise<void> => {
   if (!trackedDriverId || trackedOrderIds.length === 0) return;
-
   const now = Date.now();
   if (lastPublishedAt != null && now - lastPublishedAt < 3000) return;
   lastPublishedAt = now;
@@ -96,30 +75,30 @@ const sameSession = (driverId: string, sortedIds: string[]): boolean =>
 
 export const LocationService = {
   async hasPermission(): Promise<boolean> {
-    const state = await permissionState();
-    return state === 'granted';
+    const permission = await Location.getForegroundPermissionsAsync();
+    return permission.granted;
   },
 
   async isPermissionDeniedForever(): Promise<boolean> {
-    return (await permissionState()) === 'denied';
+    const permission = await Location.getForegroundPermissionsAsync();
+    return permission.status === Location.PermissionStatus.DENIED && !permission.canAskAgain;
   },
 
-  /**
-   * Browsers expose no per-site settings deep link. The denied-permission UI
-   * shows {@link LOCATION_SETTINGS_HELP} inline instead of a native dialog.
-   */
   async openLocationSettings(): Promise<string> {
+    try {
+      await Linking.openSettings();
+    } catch {
+      // Screen shows the help text inline if settings cannot be opened.
+    }
     return LOCATION_SETTINGS_HELP;
   },
 
   async requestPermission(): Promise<boolean> {
-    if (!geolocation()) return false;
-    const existing = await permissionState();
-    if (existing === 'granted') return true;
-    if (existing === 'denied') return false;
-    // The prompt only appears in response to a position request.
-    const position = await readPosition({ enableHighAccuracy: true, timeout: 15_000 });
-    return position != null;
+    const existing = await Location.getForegroundPermissionsAsync();
+    if (existing.granted) return true;
+    if (!existing.canAskAgain) return false;
+    const requested = await Location.requestForegroundPermissionsAsync();
+    return requested.granted;
   },
 
   get isTracking(): boolean {
@@ -128,56 +107,56 @@ export const LocationService = {
 
   async getCurrentPosition(): Promise<DriverGeoPosition | null> {
     if (!(await LocationService.requestPermission())) return null;
-    return readPosition({ enableHighAccuracy: true });
+    return readPosition();
   },
 
-  /** Haversine distance in km. */
   calculateDistance,
 
-  async startTracking({ driverId, orderIds }: { driverId: string; orderIds: string[] }): Promise<void> {
-    const hasPermission = await LocationService.requestPermission();
-    if (!hasPermission || orderIds.length === 0) {
+  async startTracking({
+    driverId,
+    orderIds,
+  }: {
+    driverId: string;
+    orderIds: string[];
+  }): Promise<void> {
+    if (!(await LocationService.requestPermission()) || orderIds.length === 0) {
       LocationService.stopTracking();
       return;
     }
 
     trackedDriverId = driverId;
     trackedOrderIds = [...orderIds].sort();
-
-    // Publish one initial position immediately so tracking appears right away.
-    const currentPosition = await readPosition({ enableHighAccuracy: true });
-    if (currentPosition) await publishPosition(currentPosition);
-
-    // The foreground watcher is NOT started here — only when the driver marks
-    // the order as picked up (out_for_delivery).
+    const position = await readPosition();
+    if (position) await publishPosition(position);
   },
 
   async syncTrackingForDriver({ driverId }: { driverId: string }): Promise<void> {
     const activeOrderIds = await OrderService.fetchTrackableOrderIds({ driverId });
-
     if (activeOrderIds.length === 0) {
       LocationService.stopTracking();
       return;
     }
-
     const sortedIds = [...activeOrderIds].sort();
     if (sameSession(driverId, sortedIds)) return;
-
     await LocationService.startTracking({ driverId, orderIds: sortedIds });
   },
 
-  async syncTrackingOrderIds({ driverId, orderIds }: { driverId: string; orderIds: string[] }): Promise<void> {
+  async syncTrackingOrderIds({
+    driverId,
+    orderIds,
+  }: {
+    driverId: string;
+    orderIds: string[];
+  }): Promise<void> {
     if (orderIds.length === 0) {
       LocationService.stopTracking();
       return;
     }
-
     const sortedIds = [...new Set(orderIds)].sort();
     if (sameSession(driverId, sortedIds)) return;
 
     trackedDriverId = driverId;
     trackedOrderIds = sortedIds;
-
     if (BackgroundLocationService.isRunning) {
       BackgroundLocationService.updateOrderIds(sortedIds);
     } else {
@@ -186,7 +165,7 @@ export const LocationService = {
   },
 
   stopTracking(): void {
-    BackgroundLocationService.stop();
+    void BackgroundLocationService.stop();
     trackedDriverId = null;
     trackedOrderIds = [];
     lastPublishedAt = null;

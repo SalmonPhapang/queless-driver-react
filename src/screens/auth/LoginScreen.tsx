@@ -1,13 +1,17 @@
-import { useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { AppBar } from '../../components/ui/AppBar';
-import { Button } from '../../components/ui/Button';
-import { TextField } from '../../components/ui/Field';
-import { DeviceVerificationDialog } from '../../components/DeviceVerificationDialog';
+import { useState } from 'react';
+import { router } from 'expo-router';
+import { StyleSheet, Text, View } from 'react-native';
+import { AppBar } from '../../components/AppBar';
+import { Button } from '../../components/Button';
+import { requestDeviceChallenge } from '../../components/DeviceVerificationModal';
+import { Input } from '../../components/Input';
+import { Screen } from '../../components/Screen';
 import { errorMessage } from '../../lib/errors';
 import { AuthService } from '../../services/authService';
 import { DeviceBindingService } from '../../services/deviceBindingService';
 import { UiService } from '../../services/uiService';
+import { useTheme } from '../../theme/ThemeContext';
+import { typography } from '../../theme/typography';
 
 /**
  * Port of lib/screens/auth/login_screen.dart.
@@ -16,27 +20,17 @@ import { UiService } from '../../services/uiService';
  * this account has never seen must pass it before it is let in.
  */
 export const LoginScreen = () => {
-  const navigate = useNavigate();
+  const { colors } = useTheme();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const [challengeOpen, setChallengeOpen] = useState(false);
-  const challengeResolver = useRef<((ok: boolean) => void) | null>(null);
 
-  // The challenge is forced (no Cancel / backdrop / Escape dismissal) and is
-  // awaited here before navigation. A route would leave a signed-in but
-  // unverified session able to deep-link straight into /home.
+  // The challenge is forced (no Cancel / backdrop / hardware-back dismissal)
+  // and is awaited here before navigation. A route would leave a signed-in but
+  // unverified session able to deep-link straight into home. RootGate renders
+  // the modal once the guest gate hands the new session over to it.
   const showDeviceChallenge = (): Promise<boolean> =>
-    new Promise((resolve) => {
-      challengeResolver.current = resolve;
-      setChallengeOpen(true);
-    });
-
-  const finishChallenge = () => {
-    setChallengeOpen(false);
-    challengeResolver.current?.(true);
-    challengeResolver.current = null;
-  };
+    requestDeviceChallenge(DeviceBindingService.client);
 
   const login = async () => {
     if (!email || !password) {
@@ -65,7 +59,8 @@ export const LoginScreen = () => {
         return;
       }
 
-      navigate('/', { replace: true });
+      // RootGate re-evaluates every gate once the session exists.
+      router.replace('/');
     } catch (error) {
       UiService.showError(`Login failed: ${errorMessage(error)}`);
     } finally {
@@ -74,58 +69,52 @@ export const LoginScreen = () => {
   };
 
   return (
-    <div className="app-frame">
-      <div className="screen">
-        <AppBar title="Log in" back onBack={() => navigate(-1)} />
-        <div className="screen-body screen-body--pad-lg">
-          <div style={{ maxWidth: 420, margin: '0 auto' }}>
-            <h1 className="page-title">Welcome back</h1>
-            <p className="text-muted mt-8" style={{ fontSize: 16 }}>
-              Enter your details to continue delivering.
-            </p>
+    <Screen padded={false} contentContainerStyle={styles.body}>
+      <AppBar title="Log in" onBack={() => router.back()} />
+      <View style={styles.form}>
+        <Text style={[typography.headlineMedium, styles.pageTitle, { color: colors.text }]}>
+          Welcome back
+        </Text>
+        <Text style={[typography.bodyLarge, styles.subtitle, { color: colors.textMuted }]}>
+          Enter your details to continue delivering.
+        </Text>
 
-            <div className="stack mt-32">
-              <TextField
-                label="Email"
-                type="email"
-                inputMode="email"
-                autoComplete="email"
-                placeholder="email@example.com"
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-              />
-              <TextField
-                label="Password"
-                type="password"
-                autoComplete="current-password"
-                placeholder="Enter your password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') void login();
-                }}
-              />
-            </div>
+        <View style={styles.fields}>
+          <Input
+            label="Email"
+            keyboardType="email-address"
+            autoComplete="email"
+            placeholder="email@example.com"
+            value={email}
+            onChangeText={setEmail}
+          />
+          <Input
+            label="Password"
+            secureTextEntry
+            autoComplete="current-password"
+            placeholder="Enter your password"
+            value={password}
+            onChangeText={setPassword}
+            onSubmitEditing={() => void login()}
+          />
+        </View>
 
-            <Button
-              variant="primary"
-              block
-              className="mt-32"
-              loading={loading}
-              onClick={() => void login()}
-            >
-              Log in
-            </Button>
-          </div>
-        </div>
-      </div>
-
-      {challengeOpen && (
-        <DeviceVerificationDialog
-          client={DeviceBindingService.client}
-          onVerified={() => finishChallenge()}
+        <Button
+          title="Log in"
+          variant="primary"
+          block
+          loading={loading}
+          onPress={() => void login()}
         />
-      )}
-    </div>
+      </View>
+    </Screen>
   );
 };
+
+const styles = StyleSheet.create({
+  body: { padding: 24, flexGrow: 1 },
+  form: { width: '100%', maxWidth: 420, alignSelf: 'center' },
+  pageTitle: { fontWeight: '700' },
+  subtitle: { marginTop: 8 },
+  fields: { marginTop: 32, gap: 16 },
+});

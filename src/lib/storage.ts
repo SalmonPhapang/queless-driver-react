@@ -1,46 +1,34 @@
-// SharedPreferences equivalent for the web build.
-//
-// Flutter keeps install-scoped flags in SharedPreferences. On the web the
-// equivalent durable, synchronous store is localStorage; every access is
-// guarded so private-mode / disabled storage can never crash the app.
+// SharedPreferences equivalent for the native build. AsyncStorage is durable;
+// the in-memory cache keeps the ported synchronous Prefs API intact after init().
+
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const memory = new Map<string, string>();
-let storageAvailable: boolean | null = null;
-
-const storage = (): Storage | null => {
-  if (storageAvailable === false) return null;
-  try {
-    const probe = '__queless_probe__';
-    window.localStorage.setItem(probe, probe);
-    window.localStorage.removeItem(probe);
-    storageAvailable = true;
-    return window.localStorage;
-  } catch {
-    storageAvailable = false;
-    return null;
-  }
-};
+let initialized = false;
 
 export const Prefs = {
-  getString(key: string): string | null {
-    const store = storage();
-    if (!store) return memory.get(key) ?? null;
+  /** Must be awaited once at startup before any synchronous reads. */
+  async init(): Promise<void> {
+    if (initialized) return;
     try {
-      return store.getItem(key) ?? memory.get(key) ?? null;
+      const keys = await AsyncStorage.getAllKeys();
+      const entries = await AsyncStorage.multiGet(keys.filter((key) => key.startsWith('queless:')));
+      for (const [key, value] of entries) {
+        memory.set(key.slice('queless:'.length), value ?? '');
+      }
     } catch {
-      return memory.get(key) ?? null;
+      // Keep memory-only fallback.
     }
+    initialized = true;
+  },
+
+  getString(key: string): string | null {
+    return memory.get(key) ?? null;
   },
 
   setString(key: string, value: string): void {
     memory.set(key, value);
-    const store = storage();
-    if (!store) return;
-    try {
-      store.setItem(key, value);
-    } catch {
-      // Keep the in-memory copy.
-    }
+    void AsyncStorage.setItem(`queless:${key}`, value).catch(() => undefined);
   },
 
   getBool(key: string): boolean {
@@ -53,13 +41,7 @@ export const Prefs = {
 
   remove(key: string): void {
     memory.delete(key);
-    const store = storage();
-    if (!store) return;
-    try {
-      store.removeItem(key);
-    } catch {
-      // Nothing to do.
-    }
+    void AsyncStorage.removeItem(`queless:${key}`).catch(() => undefined);
   },
 };
 
@@ -70,4 +52,11 @@ export const PrefKeys = {
   approvalWelcomeSeen: 'approval_welcome_seen',
   permissionsRequested: 'permissions_requested',
   driverDeviceId: 'driver_device_id',
+  pushToken: 'queless_push_token',
+  pushProvider: 'queless_push_provider',
+  pushTopics: 'queless_push_topics',
+  batteryExempted: 'battery_optimisation_exempted',
+  locationDriverId: 'location_driver_id',
+  locationOrderIds: 'location_order_ids',
+  driverOrdersTopic: 'DRIVER_ORDERS_READY',
 } as const;

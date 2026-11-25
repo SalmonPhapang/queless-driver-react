@@ -4,7 +4,6 @@ import { create } from 'zustand';
 interface AuthState {
   user: User | null;
   initialized: boolean;
-  /** Why this device was signed out, when the reason was device binding. */
   deviceSignOutReason: string | null;
   setUser: (user: User | null) => void;
   setInitialized: (initialized: boolean) => void;

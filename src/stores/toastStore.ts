@@ -6,7 +6,6 @@ export interface Toast {
   id: number;
   message: string;
   kind: ToastKind;
-  /** Milliseconds; 0 = persistent (loading). */
   duration: number;
 }
 
@@ -19,16 +18,13 @@ interface ToastState {
 
 let nextId = 1;
 
-/** Port of lib/services/ui_service.dart's snackbar layer. */
 export const useToastStore = create<ToastState>((set) => ({
   toasts: [],
   push: (toast) => {
     const id = nextId++;
-    // UiService calls hideCurrentSnackBar() before every snackbar, so only
-    // the newest toast is ever visible.
     set({ toasts: [{ ...toast, id }] });
     if (toast.duration > 0) {
-      window.setTimeout(() => {
+      setTimeout(() => {
         set((state) => ({ toasts: state.toasts.filter((t) => t.id !== id) }));
       }, toast.duration);
     }

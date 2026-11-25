@@ -1,44 +1,32 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import {
-  BadgeCheck,
-  Camera,
-  Car,
-  ChevronRight,
-  Clock,
-  CreditCard,
-  Image as ImageIcon,
-  LogOut,
-  Pencil,
-  Phone,
-  RefreshCw,
-  SunMoon,
-  User,
-  Wallet,
-  Zap,
-} from 'lucide-react';
-import { Avatar } from '../../components/ui/Avatar';
-import { Badge } from '../../components/ui/Badge';
-import { Button } from '../../components/ui/Button';
-import { SelectField, TextField } from '../../components/ui/Field';
-import { IconButton } from '../../components/ui/IconButton';
-import { Modal } from '../../components/ui/Modal';
-import { Spinner } from '../../components/ui/Spinner';
-import { StatusMessage } from '../../components/ui/StatusMessage';
-import { Switch } from '../../components/ui/Switch';
-import { cn } from '../../lib/cn';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { router } from 'expo-router';
+import * as ImagePicker from 'expo-image-picker';
+import { Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import type { StyleProp, TextStyle } from 'react-native';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import { Avatar } from '../../components/Avatar';
+import { Badge } from '../../components/Badge';
+import { Button } from '../../components/Button';
+import { Card } from '../../components/Card';
+import { Input } from '../../components/Input';
+import { Screen } from '../../components/Screen';
+import { SelectField } from '../../components/SelectField';
+import { LoadingScreen, Spinner } from '../../components/Spinner';
+import { StatusMessage } from '../../components/StatusMessage';
+import { Switch } from '../../components/Switch';
+import { UpdateDialog } from '../../components/UpdateDialog';
 import { errorMessage } from '../../lib/errors';
 import { formatCurrency } from '../../lib/format';
+import type { AppVersion } from '../../models/appVersion';
 import type { Driver } from '../../models/driver';
 import { AuthService } from '../../services/authService';
 import { DriverService } from '../../services/driverService';
 import { PayoutService } from '../../services/payoutService';
-import { ShorebirdService } from '../../services/shorebirdService';
 import { UiService } from '../../services/uiService';
+import { VersionService } from '../../services/versionService';
 import { useAuthStore } from '../../stores/authStore';
-import { useThemeStore } from '../../stores/themeStore';
-import type { ThemeMode } from '../../stores/themeStore';
-import './profile.css';
+import { useTheme, type ThemeMode } from '../../theme/ThemeContext';
+import { typography } from '../../theme/typography';
 
 /** The service areas offered by the Dart location dropdown, in order. */
 const LOCATIONS = [
@@ -76,53 +64,10 @@ const themeModeText = (mode: ThemeMode): string => {
   }
 };
 
-/**
- * `image_picker` with maxWidth/maxHeight 1000 and imageQuality 85 has no direct
- * web equivalent. A canvas does the same resize/JPEG compression before upload.
- */
-const prepareImage = async (file: File): Promise<File> => {
-  try {
-    const bitmap = await createImageBitmap(file);
-    const scale = Math.min(1, 1000 / Math.max(bitmap.width, bitmap.height));
-    const width = Math.max(1, Math.round(bitmap.width * scale));
-    const height = Math.max(1, Math.round(bitmap.height * scale));
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-    const context = canvas.getContext('2d');
-    if (!context) {
-      bitmap.close();
-      return file;
-    }
-    context.fillStyle = '#fff';
-    context.fillRect(0, 0, width, height);
-    context.drawImage(bitmap, 0, 0, width, height);
-    bitmap.close();
-
-    const blob = await new Promise<Blob | null>((resolve) =>
-      canvas.toBlob(resolve, 'image/jpeg', 0.85),
-    );
-    if (!blob) return file;
-    const name = file.name.replace(/\.[^.]+$/, '') || 'profile';
-    return new File([blob], `${name}.jpg`, { type: 'image/jpeg' });
-  } catch (error) {
-    console.debug('Image preparation failed, uploading the original:', error);
-    return file;
-  }
-};
-
-/**
- * Port of lib/screens/home/tabs/profile_tab.dart.
- *
- * Renders inside the home shell's <Outlet/>, so it owns no app bar: the shell
- * keeps the notification badge and bottom navigation while this content
- * scrolls in `.screen-body`.
- */
+/** Port of lib/screens/home/tabs/profile_tab.dart. */
 export const ProfileTab = () => {
-  const navigate = useNavigate();
+  const { colors, mode, setMode } = useTheme();
   const user = useAuthStore((state) => state.user);
-  const themeMode = useThemeStore((state) => state.mode);
-  const setThemeMode = useThemeStore((state) => state.setMode);
 
   const [driver, setDriver] = useState<Driver | null>(null);
   const [loading, setLoading] = useState(true);
@@ -134,7 +79,11 @@ export const ProfileTab = () => {
   const [isCheckingForUpdates, setIsCheckingForUpdates] = useState(false);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [updateDialogOpen, setUpdateDialogOpen] = useState(false);
+  const [themePickerOpen, setThemePickerOpen] = useState(false);
+  const [updatePrompt, setUpdatePrompt] = useState<{
+    version: AppVersion;
+    status: 'none' | 'recommended' | 'forced';
+  } | null>(null);
   const [signOutError, setSignOutError] = useState<string | null>(null);
 
   const [fullName, setFullName] = useState('');
@@ -146,16 +95,12 @@ export const ProfileTab = () => {
   const [vehiclePlate, setVehiclePlate] = useState('');
   const [errors, setErrors] = useState<FormErrors>({});
 
-  const galleryInput = useRef<HTMLInputElement>(null);
-  const cameraInput = useRef<HTMLInputElement>(null);
-  const previewUrl = useRef<string | null>(null);
   const alive = useRef(true);
 
   useEffect(() => {
     alive.current = true;
     return () => {
       alive.current = false;
-      if (previewUrl.current) URL.revokeObjectURL(previewUrl.current);
     };
   }, []);
 
@@ -166,13 +111,11 @@ export const ProfileTab = () => {
       // Align with the settlement-based wallet: use Paystack settlement data
       // (all-time) instead of the local driver_payments sum.
       const settlement = await PayoutService.getSettlementData(user.id);
-      const patch = await ShorebirdService.getCurrentPatch();
 
       if (!alive.current) return;
 
       setDriver(driverProfile);
       setWalletBalance(settlement.total_earned ?? 0);
-      setPatchNumber(patch?.number ?? null);
       if (driverProfile) {
         setFullName(driverProfile.fullName ?? '');
         setContactNumber(driverProfile.contactNumber ?? '');
@@ -195,10 +138,10 @@ export const ProfileTab = () => {
     void loadProfile();
   }, [loadProfile]);
 
-  const uploadImage = async (file: File) => {
+  const uploadImage = async (uri: string) => {
     if (!user) return;
     try {
-      const imageUrl = await DriverService.uploadProfileImage(user.id, file);
+      const imageUrl = await DriverService.uploadProfileImage(user.id, uri);
       // saveProfile now only updates image_url (other fields preserved via
       // null-safe upsert).
       await DriverService.saveProfile({ id: user.id, imageUrl });
@@ -211,16 +154,30 @@ export const ProfileTab = () => {
     }
   };
 
-  const onFilePicked = async (file: File | undefined) => {
-    if (!file) return;
+  const pickImage = async (source: 'gallery' | 'camera') => {
+    setPickerOpen(false);
     try {
-      const prepared = await prepareImage(file);
-      if (!alive.current) return;
-      const nextPreview = URL.createObjectURL(prepared);
-      if (previewUrl.current) URL.revokeObjectURL(previewUrl.current);
-      previewUrl.current = nextPreview;
-      setImagePreview(nextPreview);
-      await uploadImage(prepared);
+      const permission =
+        source === 'camera'
+          ? await ImagePicker.requestCameraPermissionsAsync()
+          : await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) return;
+
+      const options: ImagePicker.ImagePickerOptions = {
+        mediaTypes: ['images'],
+        allowsEditing: false,
+        quality: 0.85,
+      };
+      const result =
+        source === 'camera'
+          ? await ImagePicker.launchCameraAsync(options)
+          : await ImagePicker.launchImageLibraryAsync(options);
+      if (result.canceled) return;
+
+      const uri = result.assets?.[0]?.uri;
+      if (!uri) return;
+      setImagePreview(uri);
+      await uploadImage(uri);
     } catch (error) {
       if (!alive.current) return;
       UiService.showError(`Error picking image: ${errorMessage(error)}`);
@@ -270,16 +227,7 @@ export const ProfileTab = () => {
     const plate = vehiclePlate.trim();
     const location = selectedLocation;
 
-    if (
-      !name ||
-      !phone ||
-      !id ||
-      !make ||
-      !model ||
-      !color ||
-      !plate ||
-      !location
-    ) {
+    if (!name || !phone || !id || !make || !model || !color || !plate || !location) {
       UiService.showError('Please fill in all required fields');
       return;
     }
@@ -324,55 +272,19 @@ export const ProfileTab = () => {
     }
   };
 
-  const downloadShorebirdUpdate = async () => {
-    UiService.showLoading('Downloading update...');
-    try {
-      await ShorebirdService.update();
-      if (!alive.current) return;
-      UiService.hideSnackBar();
-      UiService.showSuccess('Update ready! Please restart the app to apply.');
-      // Refresh patch info
-      const patch = await ShorebirdService.getCurrentPatch();
-      if (alive.current) setPatchNumber(patch?.number ?? null);
-    } catch (error) {
-      if (!alive.current) return;
-      UiService.hideSnackBar();
-      UiService.showError(`Download failed: ${errorMessage(error)}`);
-    }
-  };
-
-  const showDownloadUpdateDialog = () => {
-    setUpdateDialogOpen(true);
-  };
-
-  const checkShorebirdUpdates = async () => {
+  const checkForUpdates = async () => {
     if (isCheckingForUpdates) return;
-
-    if (!ShorebirdService.isAvailable) {
-      UiService.showInfo(ShorebirdService.unavailabilityReason);
-      return;
-    }
 
     setIsCheckingForUpdates(true);
     try {
-      const status = await ShorebirdService.checkForUpdate();
+      const result = await VersionService.checkForUpdate();
       if (!alive.current) return;
 
-      switch (status) {
-        case 'upToDate':
-          UiService.showInfo('You are up to date!');
-          break;
-        case 'outdated':
-          showDownloadUpdateDialog();
-          break;
-        case 'restartRequired':
-          UiService.showInfo('Update ready! Please restart the app to apply.');
-          break;
-        case 'unavailable':
-          UiService.showError(
-            ShorebirdService.unavailabilityReason || 'Shorebird update service is unavailable.',
-          );
-          break;
+      setPatchNumber(result.version?.buildNumber ?? null);
+      if (result.status === 'none') {
+        UiService.showInfo('You are up to date!');
+      } else if (result.version) {
+        setUpdatePrompt({ version: result.version, status: result.status });
       }
     } catch (error) {
       if (!alive.current) return;
@@ -383,265 +295,250 @@ export const ProfileTab = () => {
   };
 
   if (loading) {
-    return (
-      <div className="loading-screen">
-        <Spinner />
-      </div>
-    );
+    return <LoadingScreen />;
   }
 
   const isOnline = driver?.driverStatus === 'online';
   const isVerified = driver?.isVerified === true;
 
   return (
-    <div className="profile-tab">
-      <div className="profile-hero">
-        <button
-          type="button"
-          className="profile-avatar-btn"
-          aria-label="Change profile photo"
-          onClick={() => setPickerOpen(true)}
+    <Screen scroll contentContainerStyle={styles.content}>
+      <View style={styles.hero}>
+        <TouchableOpacity
+          style={styles.avatarButton}
+          onPress={() => setPickerOpen(true)}
+          accessibilityLabel="Change profile photo"
         >
           <Avatar
-            src={imagePreview ?? driver?.imageUrl}
+            uri={imagePreview ?? driver?.imageUrl ?? undefined}
             name={driver?.fullName ?? user?.email ?? 'Driver'}
-            size="lg"
           />
-          <span className="avatar-edit">
-            <Camera size={16} />
-          </span>
-        </button>
+          <View
+            style={[
+              styles.avatarEdit,
+              { backgroundColor: colors.card, borderColor: colors.divider },
+            ]}
+          >
+            <MaterialCommunityIcons name="camera" size={16} color={colors.primary} />
+          </View>
+        </TouchableOpacity>
 
-        <div className="grow">
-          <div className="profile-hero__name">{driver?.fullName ?? 'Driver Name'}</div>
-          <div className="profile-hero__email">{user?.email ?? ''}</div>
+        <View style={styles.grow}>
+          <Text style={[typography.titleLarge, styles.heroName, { color: colors.text }]}>
+            {driver?.fullName ?? 'Driver Name'}
+          </Text>
+          <Text style={[typography.bodySmall, { color: colors.textMuted }]}>{user?.email ?? ''}</Text>
 
-          <div className="profile-badges">
-            <Badge tone={isOnline ? 'green' : 'red'}>
-              <span
-                className="profile-status-dot"
-                style={{ background: isOnline ? 'var(--success)' : 'var(--error)' }}
+          <View style={styles.badges}>
+            <View style={styles.badgeRow}>
+              <View
+                style={[
+                  styles.dot,
+                  { backgroundColor: isOnline ? colors.success : colors.error },
+                ]}
               />
-              {isOnline ? 'ONLINE' : 'OFFLINE'}
-            </Badge>
-            <Badge tone={isVerified ? 'blue' : 'orange'}>
-              {isVerified ? <BadgeCheck size={12} /> : <Clock size={12} />}
-              {isVerified ? 'VERIFIED' : 'UNVERIFIED'}
-            </Badge>
-          </div>
-        </div>
-      </div>
+              <Badge label={isOnline ? 'ONLINE' : 'OFFLINE'} tone={isOnline ? 'green' : 'red'} />
+            </View>
+            <Badge
+              label={isVerified ? 'VERIFIED' : 'UNVERIFIED'}
+              tone={isVerified ? 'blue' : 'orange'}
+            />
+          </View>
+        </View>
+      </View>
 
-      <div className="section-title profile-section-title mt-32">DRIVER STATUS</div>
-      <div className="availability-card">
-        <span
-          className={cn('availability-card__icon', isOnline && 'availability-card__icon--on')}
+      <SectionTitle text="DRIVER STATUS" />
+      <Card style={styles.availability}>
+        <View
+          style={[
+            styles.iconBubble,
+            { backgroundColor: isOnline ? colors.success : colors.divider },
+          ]}
         >
-          <Zap size={22} />
-        </span>
-        <div className="grow">
-          <div className="label">Available for Orders</div>
-          <div className="text-xs text-muted profile-availability-copy">
+          <MaterialCommunityIcons
+            name="flash"
+            size={22}
+            color={isOnline ? colors.onPrimary : colors.textMuted}
+          />
+        </View>
+        <View style={styles.grow}>
+          <Text style={[typography.labelLarge, { color: colors.text }]}>Available for Orders</Text>
+          <Text style={[typography.caption, { color: colors.textMuted }]}>
             {isOnline
               ? 'You are currently visible to customers'
               : 'Turn on to start receiving orders'}
-          </div>
-        </div>
+          </Text>
+        </View>
         <Switch
-          checked={isOnline}
-          onChange={(checked) => void toggleOnlineStatus(checked)}
+          value={isOnline}
+          onValueChange={(checked) => void toggleOnlineStatus(checked)}
           label="Available for Orders"
         />
-      </div>
+      </Card>
 
-      <button
-        type="button"
-        className="earnings-card mt-24"
-        onClick={() => navigate('/home/wallet')}
-      >
-        <span className="earnings-card__icon">
-          <Wallet size={24} />
-        </span>
-        <span className="grow">
-          <span className="earnings-card__label" style={{ display: 'block' }}>
-            Total Earnings
-          </span>
-          <span className="earnings-card__amount" style={{ display: 'block' }}>
+      <Card style={styles.earnings} onPress={() => router.push('/home/wallet')}>
+        <View style={[styles.iconBubble, { backgroundColor: colors.primaryContainer }]}>
+          <MaterialCommunityIcons name="wallet-outline" size={24} color={colors.primary} />
+        </View>
+        <View style={styles.grow}>
+          <Text style={[typography.bodyMedium, { color: colors.text }]}>Total Earnings</Text>
+          <Text style={[typography.titleLarge, styles.earningsAmount, { color: colors.text }]}>
             {formatCurrency(walletBalance)}
-          </span>
-        </span>
-        <ChevronRight size={18} />
-      </button>
+          </Text>
+        </View>
+        <MaterialCommunityIcons name="chevron-right" size={18} color={colors.textMuted} />
+      </Card>
 
-      <div className="row-between mt-32">
-        <div className="section-title profile-section-title">PERSONAL INFORMATION</div>
+      <View style={styles.sectionHeader}>
+        <SectionTitle text="PERSONAL INFORMATION" />
         {!isEditing && (
-          <IconButton label="Edit profile" onClick={() => setIsEditing(true)}>
-            <Pencil size={18} />
-          </IconButton>
+          <TouchableOpacity
+            onPress={() => setIsEditing(true)}
+            accessibilityLabel="Edit profile"
+            style={styles.iconButton}
+          >
+            <MaterialCommunityIcons name="pencil" size={18} color={colors.primary} />
+          </TouchableOpacity>
         )}
-      </div>
+      </View>
 
-      <div className="stack mt-16">
-        <TextField
+      <View style={styles.stack}>
+        <Input
           label="Full Name"
           value={fullName}
-          readOnly={!isEditing}
+          editable={!isEditing}
           autoCapitalize="words"
-          icon={<User size={19} />}
           error={errors.fullName}
-          onChange={(event) => setFullName(event.target.value)}
+          onChangeText={setFullName}
         />
-
-        <TextField
+        <Input
           label="ID Number"
           value={idNumber}
-          readOnly={!isEditing}
-          inputMode="numeric"
+          editable={!isEditing}
+          keyboardType="numeric"
           maxLength={13}
           placeholder={isEditing ? '13-digit ID number' : undefined}
-          icon={<CreditCard size={19} />}
           error={errors.idNumber}
-          onChange={(event) => setIdNumber(event.target.value)}
+          onChangeText={setIdNumber}
         />
-
-        <TextField
+        <Input
           label="Contact Number"
           value={contactNumber}
-          readOnly={!isEditing}
-          type="tel"
-          icon={<Phone size={19} />}
+          editable={!isEditing}
+          keyboardType="phone-pad"
           error={errors.contactNumber}
-          onChange={(event) => setContactNumber(event.target.value)}
+          onChangeText={setContactNumber}
         />
-
         <SelectField
           label="Location"
           value={selectedLocation ?? ''}
           onChange={setSelectedLocation}
           options={LOCATIONS.map((location) => ({ value: location, label: location }))}
-          readOnly={!isEditing}
           error={errors.location}
+          disabled={!isEditing}
         />
-      </div>
+      </View>
 
-      <div className="section-title profile-section-title mt-32">VEHICLE DETAILS</div>
-
-      <div className="stack mt-16">
-        <div className="profile-field-row">
-          <TextField
-            label="Make"
-            value={vehicleMake}
-            readOnly={!isEditing}
-            error={errors.vehicleMake}
-            onChange={(event) => setVehicleMake(event.target.value)}
-          />
-          <TextField
-            label="Model"
-            value={vehicleModel}
-            readOnly={!isEditing}
-            error={errors.vehicleModel}
-            onChange={(event) => setVehicleModel(event.target.value)}
-          />
-        </div>
-
-        <div className="profile-field-row">
-          <TextField
-            label="Color"
-            value={vehicleColor}
-            readOnly={!isEditing}
-            error={errors.vehicleColor}
-            onChange={(event) => setVehicleColor(event.target.value)}
-          />
-          <TextField
-            label="Number Plate"
-            value={vehiclePlate}
-            readOnly={!isEditing}
-            autoCapitalize="characters"
-            icon={<Car size={19} />}
-            error={errors.vehiclePlate}
-            onChange={(event) => setVehiclePlate(event.target.value)}
-          />
-        </div>
-      </div>
+      <SectionTitle text="VEHICLE DETAILS" />
+      <View style={styles.stack}>
+        <View style={styles.fieldRow}>
+          <View style={styles.fieldCell}>
+            <Input
+              label="Make"
+              value={vehicleMake}
+              editable={!isEditing}
+              error={errors.vehicleMake}
+              onChangeText={setVehicleMake}
+            />
+          </View>
+          <View style={styles.fieldCell}>
+            <Input
+              label="Model"
+              value={vehicleModel}
+              editable={!isEditing}
+              error={errors.vehicleModel}
+              onChangeText={setVehicleModel}
+            />
+          </View>
+        </View>
+        <View style={styles.fieldRow}>
+          <View style={styles.fieldCell}>
+            <Input
+              label="Color"
+              value={vehicleColor}
+              editable={!isEditing}
+              error={errors.vehicleColor}
+              onChangeText={setVehicleColor}
+            />
+          </View>
+          <View style={styles.fieldCell}>
+            <Input
+              label="Number Plate"
+              value={vehiclePlate}
+              editable={!isEditing}
+              autoCapitalize="characters"
+              error={errors.vehiclePlate}
+              onChangeText={setVehiclePlate}
+            />
+          </View>
+        </View>
+      </View>
 
       {isEditing && (
-        <>
-          <Button
-            block
-            className="profile-save-btn mt-32"
-            loading={isSaving}
-            onClick={() => void saveProfile()}
-          >
-            SAVE PROFILE
-          </Button>
-          <div className="profile-save-note">
+        <View style={styles.saveBlock}>
+          <Button title="SAVE PROFILE" block loading={isSaving} onPress={() => void saveProfile()} />
+          <Text style={[typography.caption, styles.saveNote, { color: colors.textMuted }]}>
             Note: Changing details will require re-verification
-          </div>
-          <div className="profile-cancel">
-            <Button variant="ghost" onClick={() => setIsEditing(false)}>
-              Cancel
-            </Button>
-          </div>
-        </>
+          </Text>
+          <Button title="Cancel" variant="ghost" onPress={() => setIsEditing(false)} />
+        </View>
       )}
 
-      <div className="section-title profile-section-title profile-section-gap">APP INFO</div>
-
-      <div className="list profile-list">
-        <div className="list-item">
-          <span className="list-item__icon">
-            <RefreshCw size={20} />
-          </span>
-          <div className="grow">
-            <div className="list-item__title">App Version</div>
-            <div className="list-item__subtitle">
-              Patch level: {patchNumber ?? 'Base version'}
-            </div>
-            {!ShorebirdService.isAvailable && (
-              <div className="profile-shorebird-note">
-                {ShorebirdService.unavailabilityReason}
-              </div>
-            )}
-          </div>
-          <div className="list-item__trailing">
+      <SectionTitle text="APP INFO" style={styles.appInfoTitle} />
+      <View style={styles.stack}>
+        <Card style={styles.listRow}>
+          <View style={[styles.listIcon, { backgroundColor: colors.primaryContainer }]}>
+            <MaterialCommunityIcons name="refresh" size={20} color={colors.primary} />
+          </View>
+          <View style={styles.grow}>
+            <Text style={[typography.labelLarge, { color: colors.text }]}>App Version</Text>
+            <Text style={[typography.caption, { color: colors.textMuted }]}>
+              {`Patch level: ${patchNumber ?? 'Base version'}`}
+            </Text>
+          </View>
+          <View style={styles.trailing}>
             {isCheckingForUpdates ? (
-              <Spinner size="sm" />
+              <Spinner />
             ) : (
-              <Button variant="ghost" size="xs" onClick={() => void checkShorebirdUpdates()}>
-                Check for Updates
-              </Button>
+              <Button
+                title="Check for Updates"
+                variant="ghost"
+                size="sm"
+                onPress={() => void checkForUpdates()}
+              />
             )}
-          </div>
-        </div>
+          </View>
+        </Card>
 
-        <div className="list-item">
-          <span className="list-item__icon">
-            <SunMoon size={20} />
-          </span>
-          <div className="grow">
-            <div className="list-item__title">Theme</div>
-            <div className="list-item__subtitle">{themeModeText(themeMode)}</div>
-          </div>
-          <div className="list-item__trailing">
-            <select
-              className="profile-theme-select"
-              aria-label="Theme"
-              value={themeMode}
-              onChange={(event) => setThemeMode(event.target.value as ThemeMode)}
-            >
-              {THEME_MODES.map((mode) => (
-                <option key={mode} value={mode}>
-                  {themeModeText(mode)}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
+        <TouchableOpacity
+          style={[styles.listRow, styles.listRowPressable, { backgroundColor: colors.card }]}
+          onPress={() => setThemePickerOpen(true)}
+          activeOpacity={0.7}
+        >
+          <View style={[styles.listIcon, { backgroundColor: colors.primaryContainer }]}>
+            <MaterialCommunityIcons name="theme-light-dark" size={20} color={colors.primary} />
+          </View>
+          <View style={styles.grow}>
+            <Text style={[typography.labelLarge, { color: colors.text }]}>Theme</Text>
+            <Text style={[typography.caption, { color: colors.textMuted }]}>
+              {themeModeText(mode)}
+            </Text>
+          </View>
+          <MaterialCommunityIcons name="chevron-right" size={18} color={colors.textMuted} />
+        </TouchableOpacity>
+      </View>
 
-      </div>
-
-      <div className="section-title profile-section-title mt-24">ACCOUNT</div>
+      <SectionTitle text="ACCOUNT" style={styles.accountTitle} />
 
       {signOutError && (
         <StatusMessage
@@ -652,10 +549,9 @@ export const ProfileTab = () => {
         />
       )}
 
-      <button
-        type="button"
-        className="list-item profile-logout"
-        onClick={() => {
+      <TouchableOpacity
+        style={[styles.listRow, styles.logoutRow, { backgroundColor: colors.card }]}
+        onPress={() => {
           setSignOutError(null);
           void AuthService.signOut().catch((error) => {
             setSignOutError(errorMessage(error));
@@ -664,95 +560,267 @@ export const ProfileTab = () => {
             UiService.showError(`Could not sign out: ${errorMessage(error)}`);
           });
         }}
+        activeOpacity={0.7}
       >
-        <span className="list-item__icon profile-logout__icon">
-          <LogOut size={20} />
-        </span>
-        <span className="list-item__title profile-logout__title">Logout</span>
-      </button>
+        <View style={[styles.listIcon, { backgroundColor: colors.error }]}>
+          <MaterialCommunityIcons name="logout" size={20} color={colors.onError} />
+        </View>
+        <Text style={[typography.labelLarge, styles.logoutTitle, { color: colors.text }]}>
+          Logout
+        </Text>
+      </TouchableOpacity>
 
-      {/* Hidden inputs replace image_picker's gallery/camera sources on web. */}
-      <input
-        ref={galleryInput}
-        type="file"
-        accept="image/*"
-        className="sr-only"
-        onChange={(event) => {
-          const file = event.target.files?.[0];
-          event.target.value = '';
-          void onFilePicked(file);
-        }}
-      />
-      <input
-        ref={cameraInput}
-        type="file"
-        accept="image/*"
-        capture="environment"
-        className="sr-only"
-        onChange={(event) => {
-          const file = event.target.files?.[0];
-          event.target.value = '';
-          void onFilePicked(file);
-        }}
-      />
-
-      {pickerOpen && (
-        <Modal onClose={() => setPickerOpen(false)}>
-          <div className="list">
-            <button
-              type="button"
-              className="list-item"
-              onClick={() => {
-                setPickerOpen(false);
-                galleryInput.current?.click();
-              }}
+      {/* Photo source picker replaces image_picker's gallery/camera sources on web. */}
+      <Modal
+        visible={pickerOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setPickerOpen(false)}
+      >
+        <View style={styles.overlay}>
+          <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.divider }]}>
+            <TouchableOpacity
+              style={styles.modalRow}
+              onPress={() => void pickImage('gallery')}
+              activeOpacity={0.7}
             >
-              <span className="list-item__icon">
-                <ImageIcon size={20} />
-              </span>
-              <span className="list-item__title">Photo Gallery</span>
-            </button>
-            <button
-              type="button"
-              className="list-item"
-              onClick={() => {
-                setPickerOpen(false);
-                cameraInput.current?.click();
-              }}
+              <View style={[styles.listIcon, { backgroundColor: colors.primaryContainer }]}>
+                <MaterialCommunityIcons name="image" size={20} color={colors.primary} />
+              </View>
+              <Text style={[typography.labelLarge, { color: colors.text }]}>Photo Gallery</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.modalRow}
+              onPress={() => void pickImage('camera')}
+              activeOpacity={0.7}
             >
-              <span className="list-item__icon">
-                <Camera size={20} />
-              </span>
-              <span className="list-item__title">Camera</span>
-            </button>
-          </div>
-        </Modal>
-      )}
+              <View style={[styles.listIcon, { backgroundColor: colors.primaryContainer }]}>
+                <MaterialCommunityIcons name="camera" size={20} color={colors.primary} />
+              </View>
+              <Text style={[typography.labelLarge, { color: colors.text }]}>Camera</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
-      {updateDialogOpen && (
-        <Modal
-          title="Update Available"
-          onClose={() => setUpdateDialogOpen(false)}
-          actions={
-            <>
-              <Button variant="ghost" onClick={() => setUpdateDialogOpen(false)}>
-                Later
-              </Button>
-              <Button
-                onClick={() => {
-                  setUpdateDialogOpen(false);
-                  void downloadShorebirdUpdate();
+      <Modal
+        visible={themePickerOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setThemePickerOpen(false)}
+      >
+        <View style={styles.overlay}>
+          <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.divider }]}>
+            <Text style={[typography.titleMedium, styles.modalTitle, { color: colors.text }]}>
+              Theme
+            </Text>
+            {THEME_MODES.map((option) => (
+              <TouchableOpacity
+                key={option}
+                style={styles.modalRow}
+                onPress={() => {
+                  setMode(option);
+                  setThemePickerOpen(false);
                 }}
+                activeOpacity={0.7}
               >
-                Download
-              </Button>
-            </>
-          }
-        >
-          <p>A new update is available. Would you like to download it now?</p>
-        </Modal>
-      )}
+                <View style={[styles.listIcon, { backgroundColor: colors.primaryContainer }]}>
+                  <MaterialCommunityIcons
+                    name={option === 'light' ? 'white-balance-sunny' : option === 'dark' ? 'weather-night' : 'theme-light-dark'}
+                    size={20}
+                    color={colors.primary}
+                  />
+                </View>
+                <Text style={[typography.labelLarge, styles.grow, { color: colors.text }]}>
+                  {themeModeText(option)}
+                </Text>
+                {mode === option && (
+                  <MaterialCommunityIcons name="check" size={20} color={colors.primary} />
+                )}
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+      </Modal>
 
-    </div>
+      {updatePrompt && (
+        <UpdateDialog
+          version={updatePrompt.version}
+          status={updatePrompt.status}
+          onClose={() => setUpdatePrompt(null)}
+        />
+      )}
+    </Screen>
   );
 };
+
+const SectionTitle = ({
+  text,
+  style,
+}: {
+  text: string;
+  style?: StyleProp<TextStyle>;
+}) => {
+  const { colors } = useTheme();
+  return (
+    <Text style={[typography.labelLarge, styles.sectionTitle, style, { color: colors.textMuted }]}>
+      {text}
+    </Text>
+  );
+};
+
+const styles = StyleSheet.create({
+  content: {
+    padding: 16,
+    gap: 16,
+  },
+  hero: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+  },
+  avatarButton: {
+    position: 'relative',
+  },
+  avatarEdit: {
+    position: 'absolute',
+    right: -2,
+    bottom: -2,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  grow: {
+    flex: 1,
+  },
+  heroName: {
+    fontWeight: '700',
+  },
+  badges: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 8,
+    flexWrap: 'wrap',
+  },
+  badgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  dot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  sectionTitle: {
+    fontWeight: '800',
+    letterSpacing: 1,
+  },
+  appInfoTitle: {
+    marginTop: 16,
+  },
+  accountTitle: {
+    marginTop: 8,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  availability: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 14,
+  },
+  iconBubble: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  iconButton: {
+    padding: 6,
+  },
+  earnings: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 16,
+  },
+  earningsAmount: {
+    fontWeight: '800',
+    marginTop: 4,
+  },
+  stack: {
+    gap: 12,
+  },
+  fieldRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  fieldCell: {
+    flex: 1,
+  },
+  saveBlock: {
+    gap: 12,
+  },
+  saveNote: {
+    textAlign: 'center',
+  },
+  listRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 14,
+  },
+  listRowPressable: {
+    borderRadius: 12,
+  },
+  listIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  trailing: {
+    maxWidth: 150,
+  },
+  logoutRow: {
+    borderRadius: 12,
+  },
+  logoutTitle: {
+    fontWeight: '600',
+  },
+  overlay: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  modalCard: {
+    width: '100%',
+    maxWidth: 420,
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 8,
+  },
+  modalTitle: {
+    padding: 12,
+  },
+  modalRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 12,
+    borderRadius: 10,
+  },
+});

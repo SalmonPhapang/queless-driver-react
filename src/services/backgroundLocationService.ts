@@ -1,40 +1,39 @@
-// Web port of lib/services/background_location_service.dart.
-//
-// The Flutter app runs a real Android foreground service in its own isolate so
-// GPS keeps publishing while the driver switches to Google Maps. Browsers do
-// not allow a background service of that kind, so this module keeps the same
-// public contract and behaviour while the page is alive:
-//
-//  * `start()` opens one `watchPosition` subscription with the same 10 m
-//    distance filter and 3 s publish throttle;
-//  * positions go to `driver_assignments` (batched per order) and the
-//    per-driver `driver_locations` row, exactly like the isolate did;
-//  * `isRunning`, `updateOrderIds`, `stop` behave identically.
-//
-// See README "Platform parity" for the native-wrapper path.
+// Native port of lib/services/background_location_service.dart.
+// Uses an expo-task-manager background task so GPS keeps publishing while the
+// driver navigates to Google Maps. Positions are batched across order IDs.
 
+import * as Location from 'expo-location';
+import * as TaskManager from 'expo-task-manager';
+import { Platform } from 'react-native';
+import { Prefs, PrefKeys } from '../lib/storage';
 import { OrderService } from './orderService';
 
-type GeoPosition = {
-  coords: {
-    latitude: number;
-    longitude: number;
-    accuracy: number | null;
-    speed: number | null;
-    heading: number | null;
-  };
-};
-
+const TASK_NAME = 'QUELESS_DRIVER_LOCATION';
 let initialized = false;
 let running = false;
-let driverId: string | null = null;
-let trackedOrderIds: string[] = [];
-let watchId: number | null = null;
 let lastPublishedAt: number | null = null;
 
-const publishPosition = async (position: GeoPosition): Promise<void> => {
-  const currentDriverId = driverId;
-  if (!currentDriverId || trackedOrderIds.length === 0) return;
+const readState = (): { driverId: string | null; orderIds: string[] } => {
+  let orderIds: string[] = [];
+  try {
+    const raw = Prefs.getString(PrefKeys.locationOrderIds);
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    if (Array.isArray(parsed)) orderIds = parsed.map(String);
+  } catch {
+    orderIds = [];
+  }
+  return { driverId: Prefs.getString(PrefKeys.locationDriverId), orderIds };
+};
+
+const saveState = (driverId: string | null, orderIds: string[]): void => {
+  if (driverId) Prefs.setString(PrefKeys.locationDriverId, driverId);
+  else Prefs.remove(PrefKeys.locationDriverId);
+  Prefs.setString(PrefKeys.locationOrderIds, JSON.stringify(orderIds));
+};
+
+const publish = async (location: Location.LocationObject): Promise<void> => {
+  const { driverId, orderIds } = readState();
+  if (!driverId || orderIds.length === 0) return;
 
   const now = Date.now();
   if (lastPublishedAt != null && now - lastPublishedAt < 3000) return;
@@ -42,77 +41,103 @@ const publishPosition = async (position: GeoPosition): Promise<void> => {
 
   try {
     await OrderService.updateDriverLocation({
-      orderIds: trackedOrderIds,
-      orderId: trackedOrderIds[0],
-      driverId: currentDriverId,
-      lat: position.coords.latitude,
-      lng: position.coords.longitude,
-      accuracy: position.coords.accuracy,
-      speed: position.coords.speed,
-      heading: position.coords.heading,
+      orderIds,
+      orderId: orderIds[0],
+      driverId,
+      lat: location.coords.latitude,
+      lng: location.coords.longitude,
+      accuracy: location.coords.accuracy,
+      speed: location.coords.speed,
+      heading: location.coords.heading,
     });
   } catch (error) {
     console.debug('Background location publish error:', error);
   }
 };
 
-const openWatch = (): void => {
-  if (!('geolocation' in navigator)) return;
-  watchId = navigator.geolocation.watchPosition(
-    (position) => {
-      void publishPosition(position as unknown as GeoPosition);
-    },
-    (error) => console.debug('Background location stream error:', error),
-    {
-      enableHighAccuracy: true,
-      maximumAge: 0,
-      timeout: 30_000,
-    },
-  );
-};
+TaskManager.defineTask(TASK_NAME, async ({ data, error }) => {
+  if (error) {
+    console.debug('Background location task error:', error);
+    return;
+  }
+  const locations = (data as { locations?: Location.LocationObject[] } | undefined)?.locations;
+  if (!Array.isArray(locations) || locations.length === 0) return;
+  await publish(locations[locations.length - 1]);
+});
 
 export const BackgroundLocationService = {
   get isRunning(): boolean {
     return running;
   },
 
-  /** Must be called once at app startup (in main.tsx). */
   async initialize(): Promise<void> {
     if (initialized) return;
     initialized = true;
+    running = await Location.hasStartedLocationUpdatesAsync(TASK_NAME);
   },
 
-  /** Starts publishing position updates for [driverId] across [orderIds]. */
-  async start({ driverId: nextDriverId, orderIds }: { driverId: string; orderIds: string[] }): Promise<void> {
-    if (running) {
-      driverId = nextDriverId;
-      trackedOrderIds = [...orderIds];
+  async start({
+    driverId,
+    orderIds,
+  }: {
+    driverId: string;
+    orderIds: string[];
+  }): Promise<void> {
+    saveState(driverId, orderIds);
+    if (running) return;
+
+    const foreground = await Location.requestForegroundPermissionsAsync();
+    if (!foreground.granted || orderIds.length === 0) {
+      saveState(null, []);
       return;
     }
 
+    const background = await Location.requestBackgroundPermissionsAsync();
+    if (!background.granted) {
+      // iOS users can still track while the app is foregrounded.
+      if (Platform.OS === 'android') {
+        saveState(null, []);
+        return;
+      }
+    }
+
+    await Location.startLocationUpdatesAsync(TASK_NAME, {
+      accuracy: Location.Accuracy.High,
+      timeInterval: 3000,
+      distanceInterval: 10,
+      showsBackgroundLocationIndicator: true,
+      ...(Platform.OS === 'android'
+        ? {
+            foregroundService: {
+              notificationTitle: 'Queless Driver is tracking',
+              notificationBody: 'Your live location keeps deliveries accurate.',
+              notificationColor: '#D13540',
+            },
+          }
+        : {}),
+    });
     running = true;
-    driverId = nextDriverId;
-    trackedOrderIds = [...orderIds];
     lastPublishedAt = null;
-    openWatch();
   },
 
-  /** Updates the set of tracked order IDs without restarting the watcher. */
   updateOrderIds(orderIds: string[]): void {
     if (!running) return;
-    trackedOrderIds = [...orderIds];
+    const { driverId } = readState();
+    saveState(driverId, orderIds);
   },
 
-  /** Stops the watcher. */
-  stop(): void {
-    if (!running) return;
-    running = false;
-    if (watchId != null) {
-      navigator.geolocation.clearWatch(watchId);
-      watchId = null;
+  async stop(): Promise<void> {
+    if (!running) {
+      saveState(null, []);
+      return;
     }
-    driverId = null;
-    trackedOrderIds = [];
+    try {
+      await Location.stopLocationUpdatesAsync(TASK_NAME);
+    } catch (error) {
+      console.debug('Background location stop failed:', error);
+    }
+    running = false;
     lastPublishedAt = null;
+    saveState(null, []);
   },
 };

@@ -174,6 +174,7 @@ export const AuthService = {
         await PushService.unsubscribeFromDriverTopic(id);
         await PushService.unsubscribeFromOrdersTopic();
         await PushService.unsubscribeAll();
+        await PushService.clearRegistration(id);
       } catch {
         // Ignore: sign-out must always complete.
       }

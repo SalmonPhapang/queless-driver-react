@@ -1,28 +1,34 @@
-// Web port of lib/services/battery_service.dart.
-//
-// Android OEMs aggressively kill background services; the native app asks for
-// a battery-optimisation exemption. Browsers have no such concept, so every
-// call is a no-op that reports success — keeping the permission screen's flow
-// identical without pretending to grant something the platform lacks.
+// Native port of lib/services/battery_service.dart.
+// iOS has no battery-optimisation exemption. Android opens device settings and
+// remembers that the driver was walked through the request.
+
+import { Linking, Platform } from 'react-native';
+import { Prefs, PrefKeys } from '../lib/storage';
 
 export const BatteryService = {
-  /** Whether the app is already exempt from battery optimisation. */
   async isExempted(): Promise<boolean> {
-    return true;
+    if (Platform.OS !== 'android') return true;
+    return Prefs.getBool(PrefKeys.batteryExempted);
   },
 
-  /** Attempt to grant the battery-optimisation exemption. */
   async requestExemption(): Promise<boolean> {
+    if (Platform.OS !== 'android') return true;
+    Prefs.setBool(PrefKeys.batteryExempted, true);
     return true;
   },
 
-  /** Opens the platform's battery settings page (no-op on the web). */
   async openBatterySettings(): Promise<void> {
-    // Nothing to open in a browser.
+    if (Platform.OS !== 'android') return;
+    try {
+      await Linking.openSettings();
+    } catch {
+      // The permission screen remains available.
+    }
   },
 
-  /** Shows the native explanation dialog. Always already exempt on the web. */
   async showExemptionDialog(): Promise<boolean> {
-    return true;
+    if (Platform.OS !== 'android') return true;
+    await BatteryService.openBatterySettings();
+    return BatteryService.requestExemption();
   },
 };

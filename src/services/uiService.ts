@@ -1,12 +1,5 @@
-// Port of lib/services/ui_service.dart.
-//
-// Flutter's ScaffoldMessenger snackbars and modal dialogs become a toast store
-// plus a single global dialog host. Call sites keep the same shape:
-//   UiService.showError(message)
-//   await UiService.showSuccessDialog({ title, message })
-
-import { useToastStore } from '../stores/toastStore';
 import { useDialogStore } from '../stores/dialogStore';
+import { useToastStore } from '../stores/toastStore';
 
 export interface SnackBarAction {
   label: string;
@@ -43,7 +36,6 @@ export const UiService = {
     UiService.showSnackBar(message, { duration: options.duration });
   },
 
-  /** Themed success modal with an OK button (non-dismissible). */
   showSuccessDialog({
     title,
     message,

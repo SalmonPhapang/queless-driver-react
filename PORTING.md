@@ -1,15 +1,17 @@
 # Porting contract (Flutter → React)
 
-This file is the shared contract for screen ports. **Do not edit files outside the paths assigned to you.**
-If you need screen-specific styling, create a co-located `.css` file and import it from your screen.
+This document is retained as the historical behavioral and exact-string contract
+from the retired Vite port. The live app is the Expo project at the repository root; where
+this file describes browser APIs, the native port substitutes the closest Expo
+equivalent while preserving copy, validation, and state transitions.
 
-## Stack
+## Original web port stack
 
-- Vite + React 19 + TypeScript (strict-ish; `noUnusedLocals` and `noUnusedParameters` are on).
+- Vite + React 19 + TypeScript (strict-ish; `noUnusedLocals` and `noUnusedParameters` were on).
 - Routing: `react-router-dom` v7 (`useNavigate`, `useParams`, `Link`).
 - State: `zustand` stores in `src/stores`.
 - Icons: `lucide-react`.
-- No Flutter packages exist. Everything is a browser app.
+- No Flutter packages existed in the web port; it was a browser app.
 
 ## Design system
 

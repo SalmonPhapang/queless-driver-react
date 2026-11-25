@@ -1,23 +1,16 @@
-import { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
-import { useNavigate } from 'react-router-dom';
-import {
-  CircleCheck,
-  Clock3,
-  CodeXml,
-  Hash,
-  Hourglass,
-  Landmark,
-  Pencil,
-  Plus,
-  ReceiptText,
-  UserRound,
-} from 'lucide-react';
-import { AppBar } from '../../components/ui/AppBar';
-import { Button } from '../../components/ui/Button';
-import { StatusMessage } from '../../components/ui/StatusMessage';
-import { Spinner } from '../../components/ui/Spinner';
-import { cn } from '../../lib/cn';
+import { router } from 'expo-router';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import { AppBar } from '../../components/AppBar';
+import { Badge } from '../../components/Badge';
+import { Button } from '../../components/Button';
+import { Card } from '../../components/Card';
+import { EmptyState } from '../../components/EmptyState';
+import { Screen } from '../../components/Screen';
+import { Spinner } from '../../components/Spinner';
+import { StatusMessage } from '../../components/StatusMessage';
 import { errorMessage } from '../../lib/errors';
 import { formatCurrency } from '../../lib/format';
 import type { DeliveryOrder } from '../../models/deliveryOrder';
@@ -25,7 +18,8 @@ import type { BankDetails } from '../../services/payoutService';
 import { PayoutService } from '../../services/payoutService';
 import { OrderService } from '../../services/orderService';
 import { useAuthStore } from '../../stores/authStore';
-import './wallet.css';
+import { useTheme } from '../../theme/ThemeContext';
+import { typography } from '../../theme/typography';
 
 /** Flutter's `SettlementFilter` enum and its exact local-time date ranges. */
 const SETTLEMENT_FILTERS = [
@@ -77,22 +71,33 @@ const SETTLEMENT_FILTERS = [
 
 type FilterKey = (typeof SETTLEMENT_FILTERS)[number]['key'];
 
-const BankDetailRow = ({ icon, label, value }: { icon: ReactNode; label: string; value: unknown }) => {
+const BankDetailRow = ({
+  icon,
+  label,
+  value,
+}: {
+  icon: ReactNode;
+  label: string;
+  value: unknown;
+}) => {
+  const { colors } = useTheme();
   if (value == null || String(value).length === 0) return null;
   return (
-    <div className="summary-row">
-      <span className="row" style={{ gap: 10 }}>
-        <span style={{ color: 'var(--text-muted)' }}>{icon}</span>
-        {label}
-      </span>
-      <strong className="summary-row__value">{String(value)}</strong>
-    </div>
+    <View style={styles.summaryRow}>
+      <View style={styles.rowGap}>
+        <Text style={{ color: colors.textMuted }}>{icon}</Text>
+        <Text style={[typography.bodyMedium, { color: colors.text }]}>{label}</Text>
+      </View>
+      <Text style={[typography.labelLarge, styles.summaryValue, { color: colors.text }]}>
+        {String(value)}
+      </Text>
+    </View>
   );
 };
 
 /** Port of lib/screens/home/wallet_screen.dart. */
 export const WalletScreen = () => {
-  const navigate = useNavigate();
+  const { colors } = useTheme();
   const user = useAuthStore((state) => state.user);
   const [settledAmount, setSettledAmount] = useState(0);
   const [pendingAmount, setPendingAmount] = useState(0);
@@ -107,7 +112,8 @@ export const WalletScreen = () => {
   const [settlementError, setSettlementError] = useState<string | null>(null);
   const [settlementStatusError, setSettlementStatusError] = useState<string | null>(null);
 
-  const currentFilter = SETTLEMENT_FILTERS.find((filter) => filter.key === activeFilter) ?? SETTLEMENT_FILTERS[0];
+  const currentFilter =
+    SETTLEMENT_FILTERS.find((filter) => filter.key === activeFilter) ?? SETTLEMENT_FILTERS[0];
 
   const loadBankDetailsOnly = useCallback(async () => {
     if (!user) return;
@@ -176,171 +182,380 @@ export const WalletScreen = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadBankDetailsOnly]);
 
+  const hasBankDetails =
+    bankDetails != null && Object.keys(bankDetails).length > 0 && bankDetails.bank_name != null;
+
   return (
-    <div className="app-frame">
-      <div className="screen">
-        <AppBar title="Wallet & Settlements" />
-        <div className="screen-body">
-          <div className="wallet-page">
-            <h3 className="section-title text-primary">SELECT TIME PERIOD</h3>
-            <div className="wallet-filters hide-scrollbar">
-              {SETTLEMENT_FILTERS.map((filter) => (
-                <button
-                  key={filter.key}
-                  type="button"
-                  className={cn('chip', activeFilter === filter.key && 'chip--active')}
-                  onClick={() => void loadSettlementData(filter.key)}
-                >
-                  {filter.label}
-                </button>
-              ))}
-            </div>
-
-            {settlementError && (
-              <StatusMessage
-                variant="error"
-                title="Could not load settlements"
-                message={settlementError}
-                onRetry={() => void loadSettlementData(activeFilter)}
-              />
-            )}
-
-            {loading ? (
-              <div className="loading-screen">
-                <Spinner />
-              </div>
-            ) : (
-              <div className="wallet-hero">
-                <div className="wallet-hero__eyebrow">{currentFilter.label.toUpperCase()}</div>
-                <div className="wallet-hero__caption">Settlement Summary</div>
-                <div className="wallet-hero__amount">{formatCurrency(totalEarned)}</div>
-                <div className="wallet-hero__caption">Total earned</div>
-                <p className="text-muted text-xs mt-8">
-                  Earnings appear when an order is delivered. Payouts run every Tuesday and
-                  Thursday; banks can take up to 1 business day to reflect the transfer.
-                </p>
-                <div className="wallet-hero__divider" />
-                <div className="wallet-hero__stats">
-                  <div className="wallet-stat">
-                    <div className="wallet-stat__amount">{formatCurrency(settledAmount)}</div>
-                    <div className="wallet-stat__label">
-                      <span className="wallet-stat__dot" style={{ background: 'var(--success)' }} />
-                      Settled
-                    </div>
-                  </div>
-                  <div className="wallet-hero__divider wallet-hero__divider--vertical" />
-                  <div className="wallet-stat">
-                    <div className="wallet-stat__amount">{formatCurrency(pendingAmount)}</div>
-                    <div className="wallet-stat__label">
-                      <span className="wallet-stat__dot" style={{ background: 'var(--warning)' }} />
-                      Pending
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            <div className="row-between">
-              <h3 className="section-title text-primary">BANK DETAILS</h3>
+    <Screen>
+      <AppBar title="Wallet & Settlements" />
+      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        <Text style={[typography.labelLarge, styles.sectionTitle, { color: colors.primary }]}>
+          SELECT TIME PERIOD
+        </Text>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.filters}
+        >
+          {SETTLEMENT_FILTERS.map((filter) => {
+            const active = activeFilter === filter.key;
+            return (
               <Button
-                variant="ghost"
+                key={filter.key}
+                title={filter.label}
+                variant={active ? 'primary' : 'outline'}
                 size="sm"
-                icon={
-                  bankDetails == null ? <Plus size={18} /> : <Pencil size={18} />
-                }
-                onClick={() => navigate('/home/wallet/bank-details')}
-              >
-                {bankDetails == null ? 'Add' : 'Edit'}
-              </Button>
-            </div>
-
-            {bankError && (
-              <StatusMessage
-                variant="error"
-                title="Could not load bank details"
-                message={bankError}
-                onRetry={() => void loadBankDetailsOnly()}
+                onPress={() => void loadSettlementData(filter.key)}
               />
-            )}
+            );
+          })}
+        </ScrollView>
 
-            {bankDetails != null && Object.keys(bankDetails).length > 0 && bankDetails.bank_name != null ? (
-              <div className="card card--padded">
-                <BankDetailRow icon={<Landmark size={18} />} label="Bank" value={bankDetails.bank_name} />
-                <div className="divider" />
-                <BankDetailRow icon={<UserRound size={18} />} label="Holder" value={bankDetails.account_holder} />
-                <div className="divider" />
-                <BankDetailRow icon={<Hash size={18} />} label="Account" value={bankDetails.account_number} />
-                <div className="divider" />
-                <BankDetailRow icon={<CodeXml size={18} />} label="Code" value={bankDetails.branch_code} />
-              </div>
-            ) : (
-              <div className="card card--padded center" style={{ padding: 24 }}>
-                <Landmark size={40} />
-                <p className="text-muted mt-8" style={{ fontStyle: 'italic' }}>
-                  No bank details configured.
-                </p>
-                <p className="text-muted text-xs">Add your bank details to receive Tuesday and Thursday payouts.</p>
-              </div>
-            )}
+        {settlementError && (
+          <View style={styles.errorBlock}>
+            <StatusMessage
+              variant="error"
+              title="Could not load settlements"
+              message={settlementError}
+            />
+            <Button
+              title="Try again"
+              variant="outline"
+              size="sm"
+              onPress={() => void loadSettlementData(activeFilter)}
+            />
+          </View>
+        )}
 
-            <h3 className="section-title text-primary">SETTLEMENT STATUS BY ORDER</h3>
-            {settlementStatusError && (
-              <StatusMessage
-                variant="error"
-                title="Could not load order settlements"
-                message={settlementStatusError}
-                onRetry={() => {
-                  const { from, to } = currentFilter.range();
-                  void loadSettlementStatus(from, to);
-                }}
+        {loading ? (
+          <View style={styles.center}>
+            <Spinner />
+          </View>
+        ) : (
+          <Card style={styles.hero}>
+            <Text style={[typography.labelSmall, styles.eyebrow, { color: colors.primary }]}>
+              {currentFilter.label.toUpperCase()}
+            </Text>
+            <Text style={[typography.bodyMedium, { color: colors.textMuted }]}>
+              Settlement Summary
+            </Text>
+            <Text style={[typography.display, styles.amount, { color: colors.text }]}>
+              {formatCurrency(totalEarned)}
+            </Text>
+            <Text style={[typography.bodyMedium, { color: colors.textMuted }]}>Total earned</Text>
+            <Text style={[typography.bodySmall, styles.heroCopy, { color: colors.textMuted }]}>
+              {
+                'Earnings appear when an order is delivered. Payouts run every Tuesday and Thursday; banks can take up to 1 business day to reflect the transfer.'
+              }
+            </Text>
+            <View style={[styles.divider, { backgroundColor: colors.divider }]} />
+            <View style={styles.statsRow}>
+              <View style={styles.stat}>
+                <Text style={[typography.titleMedium, styles.statAmount, { color: colors.text }]}>
+                  {formatCurrency(settledAmount)}
+                </Text>
+                <View style={styles.statLabelRow}>
+                  <View style={[styles.dot, { backgroundColor: colors.success }]} />
+                  <Text style={[typography.bodySmall, { color: colors.textMuted }]}>Settled</Text>
+                </View>
+              </View>
+              <View style={[styles.dividerVertical, { backgroundColor: colors.divider }]} />
+              <View style={styles.stat}>
+                <Text style={[typography.titleMedium, styles.statAmount, { color: colors.text }]}>
+                  {formatCurrency(pendingAmount)}
+                </Text>
+                <View style={styles.statLabelRow}>
+                  <View style={[styles.dot, { backgroundColor: colors.warning }]} />
+                  <Text style={[typography.bodySmall, { color: colors.textMuted }]}>Pending</Text>
+                </View>
+              </View>
+            </View>
+          </Card>
+        )}
+
+        <View style={styles.sectionHeader}>
+          <Text style={[typography.labelLarge, styles.sectionTitle, { color: colors.primary }]}>
+            BANK DETAILS
+          </Text>
+          <Button
+            title={bankDetails == null ? 'Add' : 'Edit'}
+            variant="ghost"
+            size="sm"
+            icon={
+              <MaterialCommunityIcons
+                name={bankDetails == null ? 'plus' : 'pencil'}
+                size={18}
+                color={colors.primary}
               />
-            )}
-            {loadingOrders ? (
-              <div className="center" style={{ padding: 20 }}>
-                <Spinner />
-              </div>
-            ) : recentOrders.length === 0 ? (
-              <div className="center" style={{ padding: 20 }}>
-                <ReceiptText size={40} color="var(--text-faint)" />
-                <strong className="mt-12">No completed orders</strong>
-                <p className="text-muted text-xs">Orders delivered in this period will appear here</p>
-              </div>
-            ) : (
-              <div className="stack-sm">
-                {recentOrders.map((order) => {
-                  const isSettled = settledOrderIds.has(order.id);
-                  return (
-                    <div className="card card--flat" key={order.id}>
-                      <span
-                        className="wallet-order-icon"
-                        style={{
-                          background: isSettled ? 'var(--success-soft)' : 'var(--warning-soft)',
-                          color: isSettled ? 'var(--success)' : 'var(--warning)',
-                        }}
-                      >
-                        {isSettled ? <CircleCheck size={20} /> : <Clock3 size={20} />}
-                      </span>
-                      <div className="grow">
-                        <div className="info-card__title">#{order.orderNumber ?? order.id.substring(0, 8)}</div>
-                        <div className="text-primary text-sm" style={{ fontWeight: 600 }}>
-                          {formatCurrency(order.deliveryFee ?? 0)}
-                        </div>
-                      </div>
-                      <span
-                        className={cn('badge', isSettled ? 'badge--green' : 'badge--orange')}
-                        style={{ gap: 3 }}
-                      >
-                        {isSettled ? <CircleCheck size={12} /> : <Hourglass size={12} />}
-                        {isSettled ? 'Paid' : 'Pending'}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
+            }
+            onPress={() => router.push('/home/wallet/bank-details')}
+          />
+        </View>
+
+        {bankError && (
+          <View style={styles.errorBlock}>
+            <StatusMessage
+              variant="error"
+              title="Could not load bank details"
+              message={bankError}
+            />
+            <Button
+              title="Try again"
+              variant="outline"
+              size="sm"
+              onPress={() => void loadBankDetailsOnly()}
+            />
+          </View>
+        )}
+
+        {hasBankDetails ? (
+          <Card style={styles.cardPadded}>
+            <BankDetailRow
+              icon={<MaterialCommunityIcons name="bank" size={18} color={colors.textMuted} />}
+              label="Bank"
+              value={bankDetails?.bank_name}
+            />
+            <View style={[styles.divider, { backgroundColor: colors.divider }]} />
+            <BankDetailRow
+              icon={<MaterialCommunityIcons name="account-outline" size={18} color={colors.textMuted} />}
+              label="Holder"
+              value={bankDetails?.account_holder}
+            />
+            <View style={[styles.divider, { backgroundColor: colors.divider }]} />
+            <BankDetailRow
+              icon={<MaterialCommunityIcons name="text" size={18} color={colors.textMuted} />}
+              label="Account"
+              value={bankDetails?.account_number}
+            />
+            <View style={[styles.divider, { backgroundColor: colors.divider }]} />
+            <BankDetailRow
+              icon={<MaterialCommunityIcons name="code-tags" size={18} color={colors.textMuted} />}
+              label="Code"
+              value={bankDetails?.branch_code}
+            />
+          </Card>
+        ) : (
+          <Card style={[styles.cardPadded, styles.center]}>
+            <MaterialCommunityIcons name="bank" size={40} color={colors.text} />
+            <Text style={[typography.bodyMedium, styles.italic, { color: colors.textMuted }]}>
+              No bank details configured.
+            </Text>
+            <Text style={[typography.bodySmall, { color: colors.textMuted }]}>
+              Add your bank details to receive Tuesday and Thursday payouts.
+            </Text>
+          </Card>
+        )}
+
+        <Text style={[typography.labelLarge, styles.sectionTitle, { color: colors.primary }]}>
+          SETTLEMENT STATUS BY ORDER
+        </Text>
+        {settlementStatusError && (
+          <View style={styles.errorBlock}>
+            <StatusMessage
+              variant="error"
+              title="Could not load order settlements"
+              message={settlementStatusError}
+            />
+            <Button
+              title="Try again"
+              variant="outline"
+              size="sm"
+              onPress={() => {
+                const { from, to } = currentFilter.range();
+                void loadSettlementStatus(from, to);
+              }}
+            />
+          </View>
+        )}
+        {loadingOrders ? (
+          <View style={styles.centerPadded}>
+            <Spinner />
+          </View>
+        ) : recentOrders.length === 0 ? (
+          <EmptyState
+            title="No completed orders"
+            message="Orders delivered in this period will appear here"
+            icon={
+              <MaterialCommunityIcons
+                name="receipt-text-outline"
+                size={40}
+                color={colors.textMuted}
+              />
+            }
+          />
+        ) : (
+          <View style={styles.stackSm}>
+            {recentOrders.map((order) => {
+              const isSettled = settledOrderIds.has(order.id);
+              return (
+                <Card key={order.id} style={styles.orderRow}>
+                  <View
+                    style={[
+                      styles.orderIcon,
+                      {
+                        backgroundColor: isSettled ? colors.success : colors.warning,
+                      },
+                    ]}
+                  >
+                    <MaterialCommunityIcons
+                      name={isSettled ? 'check-circle-outline' : 'clock-outline'}
+                      size={20}
+                      color={colors.card}
+                    />
+                  </View>
+                  <View style={styles.grow}>
+                    <Text style={[typography.titleSmall, { color: colors.text }]}>
+                      {`#${order.orderNumber ?? order.id.substring(0, 8)}`}
+                    </Text>
+                    <Text style={[typography.bodyMedium, styles.orderAmount, { color: colors.text }]}>
+                      {formatCurrency(order.deliveryFee ?? 0)}
+                    </Text>
+                  </View>
+                  <View style={styles.badgeWrap}>
+                    <MaterialCommunityIcons
+                      name={isSettled ? 'check-circle-outline' : 'timer-sand'}
+                      size={12}
+                      color={isSettled ? colors.success : colors.warning}
+                    />
+                    <Badge label={isSettled ? 'Paid' : 'Pending'} tone={isSettled ? 'green' : 'orange'} />
+                  </View>
+                </Card>
+              );
+            })}
+          </View>
+        )}
+      </ScrollView>
+    </Screen>
   );
 };
+
+const styles = StyleSheet.create({
+  content: {
+    padding: 16,
+    gap: 16,
+  },
+  sectionTitle: {
+    marginBottom: 8,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  filters: {
+    gap: 8,
+    paddingRight: 8,
+  },
+  center: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 24,
+    gap: 8,
+  },
+  centerPadded: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 20,
+  },
+  hero: {
+    padding: 20,
+  },
+  eyebrow: {
+    fontWeight: '800',
+    letterSpacing: 1,
+  },
+  amount: {
+    fontSize: 34,
+    lineHeight: 42,
+    fontWeight: '800',
+    marginTop: 8,
+  },
+  heroCopy: {
+    marginTop: 8,
+  },
+  divider: {
+    height: 1,
+    marginVertical: 16,
+  },
+  dividerVertical: {
+    width: 1,
+    height: 48,
+    marginHorizontal: 16,
+  },
+  statsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-around',
+  },
+  stat: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  statAmount: {
+    fontWeight: '700',
+  },
+  statLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 4,
+  },
+  dot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  cardPadded: {
+    padding: 20,
+    gap: 12,
+  },
+  summaryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  rowGap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  summaryValue: {
+    flexShrink: 1,
+    textAlign: 'right',
+  },
+  italic: {
+    fontStyle: 'italic',
+  },
+  errorBlock: {
+    gap: 8,
+  },
+  stackSm: {
+    gap: 8,
+  },
+  orderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 12,
+  },
+  orderIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  grow: {
+    flex: 1,
+  },
+  orderAmount: {
+    fontWeight: '600',
+    marginTop: 2,
+  },
+  badgeWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+  },
+});
