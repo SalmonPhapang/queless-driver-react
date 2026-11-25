@@ -24,6 +24,7 @@ import type { AppVersion } from '../../models/appVersion';
 import type { Driver } from '../../models/driver';
 import { AuthService } from '../../services/authService';
 import { DriverService } from '../../services/driverService';
+import { OrderService } from '../../services/orderService';
 import { PayoutService } from '../../services/payoutService';
 import { UiService } from '../../services/uiService';
 import { VersionService } from '../../services/versionService';
@@ -85,6 +86,8 @@ export const ProfileTab = () => {
   const [themePickerOpen, setThemePickerOpen] = useState(false);
   const [pendingStatus, setPendingStatus] = useState<boolean | null>(null);
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
+  const [checkingActiveOrders, setCheckingActiveOrders] = useState(false);
+  const [statusBlockReason, setStatusBlockReason] = useState<string | null>(null);
   const [updatePrompt, setUpdatePrompt] = useState<{
     version: AppVersion;
     status: 'none' | 'recommended' | 'forced';
@@ -279,8 +282,34 @@ export const ProfileTab = () => {
     }
   };
 
-  const requestStatusChange = (goOnline: boolean) => {
-    if (!user || driver == null || isUpdatingStatus) return;
+  const requestStatusChange = async (goOnline: boolean) => {
+    if (!user || driver == null || isUpdatingStatus || checkingActiveOrders) return;
+    setStatusBlockReason(null);
+
+    // Going offline is only allowed when the driver has no assigned orders
+    // still in progress. Check at request time so a stale screen cannot let
+    // someone switch off mid-delivery.
+    if (!goOnline) {
+      setCheckingActiveOrders(true);
+      try {
+        const activeOrders = await OrderService.fetchMyActiveOrders({ driverId: user.id });
+        if (!alive.current) return;
+        if (activeOrders.length > 0) {
+          const count = activeOrders.length;
+          setStatusBlockReason(
+            `You have ${count} active ${count === 1 ? 'delivery' : 'deliveries'}. Complete ${count === 1 ? 'it' : 'them'} before going offline.`,
+          );
+          return;
+        }
+      } catch (error) {
+        if (!alive.current) return;
+        UiService.showError(`Could not check active orders: ${errorMessage(error)}`);
+        return;
+      } finally {
+        if (alive.current) setCheckingActiveOrders(false);
+      }
+    }
+
     setPendingStatus(goOnline);
   };
 
@@ -335,8 +364,9 @@ export const ProfileTab = () => {
   const isVerified = driver?.isVerified === true;
 
   return (
-    <Screen scroll contentContainerStyle={styles.content}>
-      <View style={styles.hero}>
+    <>
+      <Screen scroll contentContainerStyle={styles.content}>
+        <View style={styles.hero}>
         <TouchableOpacity
           style={styles.avatarButton}
           onPress={() => setPickerOpen(true)}
@@ -397,6 +427,16 @@ export const ProfileTab = () => {
       )}
 
       <SectionTitle text="DRIVER STATUS" />
+      {statusBlockReason && (
+        <View style={styles.statusBlock}>
+          <StatusMessage
+            variant="warning"
+            title="Active delivery in progress"
+            message={statusBlockReason}
+            onDismiss={() => setStatusBlockReason(null)}
+          />
+        </View>
+      )}
       <Card style={styles.availability}>
         <View
           style={[
@@ -420,9 +460,9 @@ export const ProfileTab = () => {
         </View>
         <Switch
           value={isOnline}
-          onValueChange={requestStatusChange}
+          onValueChange={(goOnline) => void requestStatusChange(goOnline)}
           style={styles.statusSwitch}
-          disabled={driver == null || isUpdatingStatus}
+          disabled={driver == null || isUpdatingStatus || checkingActiveOrders}
         />
       </Card>
 
@@ -692,6 +732,7 @@ export const ProfileTab = () => {
           </View>
         </View>
       </Modal>
+      </Screen>
 
       <ConfirmationDialog
         visible={pendingStatus !== null}
@@ -708,7 +749,7 @@ export const ProfileTab = () => {
             ? isVerified
               ? "You'll start receiving new delivery offers right away. Make sure you're ready to head to the pickup."
               : "You'll appear online, but accepting orders stays locked until your profile is verified."
-            : "You'll stop receiving new delivery offers until you switch back online. Any active delivery stays active."
+            : "You'll stop receiving new delivery offers until you switch back online."
         }
         confirmLabel={pendingStatus === true ? 'GO ONLINE' : 'GO OFFLINE'}
         tone={pendingStatus === true ? 'success' : 'warning'}
@@ -724,7 +765,7 @@ export const ProfileTab = () => {
           onClose={() => setUpdatePrompt(null)}
         />
       )}
-    </Screen>
+    </>
   );
 };
 
