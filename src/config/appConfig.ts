@@ -34,6 +34,20 @@ export const AppConfig = {
   featureFirebase: true,
   appType: 'driver' as const,
 
+  /**
+   * Expo Go (SDK 53+) no longer ships the native push-token modules. Calling
+   * token/topic APIs there throws on Android and only warns on iOS, so every
+   * caller must treat Expo Go as "remote push unavailable" while still allowing
+   * local notifications and the Supabase realtime delivery bridge to work.
+   */
+  get isExpoGo(): boolean {
+    return Constants.appOwnership === 'expo';
+  },
+
+  get remotePushAvailable(): boolean {
+    return AppConfig.featureFirebase && !AppConfig.isExpoGo;
+  },
+
   get env(): AppEnvironment {
     const value = (rawEnv('EXPO_PUBLIC_APP_ENV') ?? 'dev').trim().toLowerCase();
     return value === 'prod' || value === 'stage' ? value : 'dev';

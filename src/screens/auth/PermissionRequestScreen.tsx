@@ -2,7 +2,6 @@ import type { ReactNode } from 'react';
 import { useEffect, useState } from 'react';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
-import * as Notifications from 'expo-notifications';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { router } from 'expo-router';
 import { Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -15,6 +14,7 @@ import { errorMessage } from '../../lib/errors';
 import { Prefs, PrefKeys } from '../../lib/storage';
 import { AuthService } from '../../services/authService';
 import { BatteryService } from '../../services/batteryService';
+import { PushService } from '../../services/pushService';
 import { UiService } from '../../services/uiService';
 import { useTheme } from '../../theme/ThemeContext';
 import { typography } from '../../theme/typography';
@@ -49,7 +49,7 @@ const PermissionTile = ({ icon, title, description, granted, onAllow }: TileProp
 export const PermissionRequestScreen = () => {
   const { colors } = useTheme();
   const [locationGranted, setLocationGranted] = useState(false);
-  const [notificationsGranted, setNotificationsGranted] = useState(!AppConfig.featureFirebase);
+  const [notificationsGranted, setNotificationsGranted] = useState(!AppConfig.remotePushAvailable);
   const [cameraGranted, setCameraGranted] = useState(false);
   const [photosGranted, setPhotosGranted] = useState(false);
   const [batteryGranted, setBatteryGranted] = useState(false);
@@ -74,9 +74,7 @@ export const PermissionRequestScreen = () => {
     void (async () => {
       try {
         const location = (await Location.getForegroundPermissionsAsync()).status === 'granted';
-        const notifications = AppConfig.featureFirebase
-          ? (await Notifications.getPermissionsAsync()).status === 'granted'
-          : true;
+        const notifications = await PushService.isAuthorized();
         const battery = await BatteryService.isExempted();
 
         // Camera and photo tiles start as "not granted" until the driver taps
@@ -134,15 +132,9 @@ export const PermissionRequestScreen = () => {
   };
 
   const requestNotifications = async () => {
-    if (!AppConfig.featureFirebase) {
-      setNotificationsGranted(true);
-      checkAndProceed({ notifications: true });
-      return;
-    }
-    const result = await Notifications.requestPermissionsAsync();
-    const granted = result.status === 'granted';
+    const granted = await PushService.requestPermission();
     setNotificationsGranted(granted);
-    if (granted) await AuthService.syncFcmToken();
+    if (granted && AppConfig.remotePushAvailable) await AuthService.syncFcmToken();
     checkAndProceed({ notifications: granted });
   };
 
@@ -228,7 +220,7 @@ export const PermissionRequestScreen = () => {
             granted={photosGranted}
             onAllow={() => void requestPhotos()}
           />
-          {AppConfig.featureFirebase && (
+          {AppConfig.remotePushAvailable && (
             <PermissionTile
               icon={<MaterialCommunityIcons name="bell-ring" size={22} color={colors.accent} />}
               title="Notifications"

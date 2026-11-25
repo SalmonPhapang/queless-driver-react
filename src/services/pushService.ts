@@ -17,6 +17,14 @@ const ALERT_AUTO_STOP_MS = 30_000;
 const TOKEN_ATTEMPTS = 3;
 const APP_ID = 'driver';
 
+if (AppConfig.isExpoGo) {
+  console.warn(
+    '[push] Expo Go cannot use remote push tokens or topics (SDK 53+). ' +
+      'Local notifications and the Supabase realtime order bridge still work. ' +
+      'Use a development build to test push alerts.',
+  );
+}
+
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowAlert: true,
@@ -209,6 +217,10 @@ const startNotificationBridge = (userId: string): void => {
 };
 
 const fetchPushToken = async (): Promise<{ token: string; provider: PushProvider } | null> => {
+  // These calls throw on Android Expo Go, so skip them entirely instead of
+  // relying on a catch that leaves a fatal native warning in the log.
+  if (!AppConfig.remotePushAvailable) return null;
+
   try {
     const projectId = Constants.expoConfig?.extra?.eas?.projectId as string | undefined;
     const expoToken = await Notifications.getExpoPushTokenAsync(
@@ -312,14 +324,18 @@ export const PushService = {
       if (orderId) router.push(`/home/orders/${orderId}`);
     }
 
-    Notifications.addPushTokenListener(() => {
-      const userId = registeredUserId ?? SupabaseConfig.currentUserId;
-      if (userId) void PushService.registerDriver(userId);
-    });
+    // Expo Go's token listener is one of the APIs that throws outright on
+    // Android. Skip it there; real devices/development builds still register.
+    if (AppConfig.remotePushAvailable) {
+      Notifications.addPushTokenListener(() => {
+        const userId = registeredUserId ?? SupabaseConfig.currentUserId;
+        if (userId) void PushService.registerDriver(userId);
+      });
+    }
   },
 
   async notificationSettings(): Promise<PushAuthorization> {
-    if (!AppConfig.featureFirebase) return 'authorized';
+    if (!AppConfig.remotePushAvailable) return 'authorized';
     await PushService.initialize();
     return toAuthorization(await Notifications.getPermissionsAsync());
   },
@@ -329,7 +345,7 @@ export const PushService = {
   },
 
   async requestPermission(): Promise<boolean> {
-    if (!AppConfig.featureFirebase) return true;
+    if (!AppConfig.remotePushAvailable) return true;
     await PushService.initialize();
     const current = await Notifications.getPermissionsAsync();
     if (allowsPush(toAuthorization(current))) return true;
@@ -338,8 +354,8 @@ export const PushService = {
   },
 
   async registerDriver(userId: string): Promise<PushRegistrationResult> {
-    if (!AppConfig.featureFirebase) {
-      return { outcome: 'unsupported', userId, authorization: 'notDetermined', topics: new Set() };
+    if (!AppConfig.remotePushAvailable) {
+      return { outcome: 'unsupported', userId, authorization: 'authorized', topics: new Set() };
     }
     if (!userId.trim()) {
       return { outcome: 'noSession', authorization: 'notDetermined', topics: new Set() };
@@ -414,14 +430,16 @@ export const PushService = {
     if (!trimmed) return false;
     const topics = readTopics();
     if (!topics.has(trimmed)) {
-      try {
-        await Notifications.subscribeToTopicAsync(trimmed);
-        topics.add(trimmed);
-      } catch {
-        // Expo Go / non-FCM builds cannot subscribe; retain locally so a later
-        // native build can retry.
-        topics.add(trimmed);
+      if (AppConfig.remotePushAvailable) {
+        try {
+          await Notifications.subscribeToTopicAsync(trimmed);
+        } catch {
+          // Best effort; retain locally so a later native build can retry.
+        }
       }
+      // Expo Go cannot subscribe to topics; keep the preference so a
+      // development build can sync it without asking the driver again.
+      topics.add(trimmed);
       writeTopics(topics);
     }
     return true;
@@ -431,10 +449,12 @@ export const PushService = {
     const topics = readTopics();
     const trimmed = topic.trim();
     if (topics.delete(trimmed)) {
-      try {
-        await Notifications.unsubscribeFromTopicAsync(trimmed);
-      } catch {
-        // Best effort.
+      if (AppConfig.remotePushAvailable) {
+        try {
+          await Notifications.unsubscribeFromTopicAsync(trimmed);
+        } catch {
+          // Best effort.
+        }
       }
       writeTopics(topics);
     }
@@ -465,6 +485,7 @@ export const PushService = {
   async unsubscribeAll(): Promise<void> {
     const stored = readTopics();
     for (const topic of stored) {
+      if (!AppConfig.remotePushAvailable) continue;
       try {
         await Notifications.unsubscribeFromTopicAsync(topic);
       } catch {
