@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Linking, StyleSheet, View } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
@@ -12,7 +12,6 @@ import { errorMessage } from '../../lib/errors';
 import type { DeliveryOrder } from '../../models/deliveryOrder';
 import { OrderStatusX } from '../../models/statuses';
 import { BackgroundLocationService } from '../../services/backgroundLocationService';
-import { DriverService } from '../../services/driverService';
 import { LocationService } from '../../services/locationService';
 import { OrderService } from '../../services/orderService';
 import { UiService } from '../../services/uiService';
@@ -58,6 +57,14 @@ export const ActiveTab = () => {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const alive = useRef(true);
+
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -67,24 +74,30 @@ export const ActiveTab = () => {
       setLoading(false);
       return;
     }
+    let fetched: DeliveryOrder[] = [];
+    let syncTracking = false;
     try {
-      // Flutter loads the profile alongside the orders so the details screen
-      // can be opened with it; our details route loads it itself, but the
-      // query is kept so the same freshness checks run on every refresh.
-      const [fetched] = await Promise.all([
-        OrderService.fetchMyActiveOrders({ driverId: user.id }),
-        DriverService.getDriverProfile(user.id),
-      ]);
+      // The active list does not need a profile fetch. The details route loads
+      // one itself, so a slow/failed profile request must not blank this tab.
+      fetched = await OrderService.fetchMyActiveOrders({ driverId: user.id });
+      syncTracking = true;
+      if (!alive.current) return;
       setOrders(fetched);
-      setLoading(false);
-      await LocationService.syncTrackingOrderIds({
-        driverId: user.id,
-        orderIds: fetched.map((order) => order.id),
-      });
     } catch (error) {
-      setLoading(false);
-      setLoadError(`Failed to load: ${errorMessage(error)}`);
+      if (alive.current) setLoadError(`Failed to load: ${errorMessage(error)}`);
+    } finally {
+      if (alive.current) setLoading(false);
     }
+
+    if (!alive.current || !syncTracking) return;
+    // Background tracking sync is best effort and must not turn a successful
+    // load into an error state.
+    void LocationService.syncTrackingOrderIds({
+      driverId: user.id,
+      orderIds: fetched.map((order) => order.id),
+    }).catch((error) => {
+      console.debug('[active] Tracking sync failed:', error);
+    });
   }, [user]);
 
   useEffect(() => {

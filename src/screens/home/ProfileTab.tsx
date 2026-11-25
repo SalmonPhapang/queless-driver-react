@@ -16,6 +16,7 @@ import { Spinner } from '../../components/Spinner';
 import { StatusMessage } from '../../components/StatusMessage';
 import { Switch } from '../../components/Switch';
 import { UpdateDialog } from '../../components/UpdateDialog';
+import { withTimeout } from '../../lib/async';
 import { errorMessage } from '../../lib/errors';
 import { formatCurrency } from '../../lib/format';
 import type { AppVersion } from '../../models/appVersion';
@@ -106,17 +107,17 @@ export const ProfileTab = () => {
   }, []);
 
   const loadProfile = useCallback(async () => {
-    if (!user) return;
+    if (!user) {
+      setDriver(null);
+      setLoading(false);
+      return;
+    }
+
     try {
       const driverProfile = await DriverService.getDriverProfile(user.id);
-      // Align with the settlement-based wallet: use Paystack settlement data
-      // (all-time) instead of the local driver_payments sum.
-      const settlement = await PayoutService.getSettlementData(user.id);
-
       if (!alive.current) return;
 
       setDriver(driverProfile);
-      setWalletBalance(settlement.total_earned ?? 0);
       if (driverProfile) {
         setFullName(driverProfile.fullName ?? '');
         setContactNumber(driverProfile.contactNumber ?? '');
@@ -127,11 +128,24 @@ export const ProfileTab = () => {
         setIdNumber(driverProfile.idNumber ?? '');
         setSelectedLocation(driverProfile.location ?? null);
       }
-      setLoading(false);
     } catch (error) {
       if (!alive.current) return;
-      setLoading(false);
       UiService.showError(`Failed to load profile: ${errorMessage(error)}`);
+    } finally {
+      if (alive.current) setLoading(false);
+    }
+
+    // Settlement data is a separate, slower edge call. The profile is already
+    // usable at this point, so never keep the whole screen behind it.
+    try {
+      const settlement = await withTimeout(
+        PayoutService.getSettlementData(user.id),
+        8_000,
+        'Settlement request',
+      );
+      if (alive.current) setWalletBalance(settlement.total_earned ?? 0);
+    } catch (error) {
+      console.debug('[profile] Settlement balance unavailable:', error);
     }
   }, [user]);
 
@@ -347,6 +361,22 @@ export const ProfileTab = () => {
           </View>
         </View>
       </View>
+
+      {driver == null && (
+        <View style={styles.statusBlock}>
+          <StatusMessage
+            variant="warning"
+            title="Driver profile unavailable"
+            message="We could not load your driver details. You can still review app settings or set the profile up again."
+          />
+          <Button
+            title="Set Up Profile"
+            variant="outline"
+            size="sm"
+            onPress={() => router.replace('/onboarding')}
+          />
+        </View>
+      )}
 
       <SectionTitle text="DRIVER STATUS" />
       <Card style={styles.availability}>
@@ -674,6 +704,9 @@ const styles = StyleSheet.create({
   content: {
     padding: 16,
     gap: 16,
+  },
+  statusBlock: {
+    gap: 8,
   },
   hero: {
     flexDirection: 'row',

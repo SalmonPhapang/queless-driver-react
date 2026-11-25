@@ -1,23 +1,9 @@
 // Port of lib/services/driver_service.dart.
 
 import { SupabaseConfig } from '../config/supabaseClient';
+import { withTimeout } from '../lib/async';
 import { Driver, DriverModel } from '../models/driver';
 import { PushService } from './pushService';
-
-const withTimeout = <T>(promise: Promise<T>, ms: number, label: string): Promise<T> =>
-  new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`${label} timed out`)), ms);
-    promise.then(
-      (value) => {
-        clearTimeout(timer);
-        resolve(value);
-      },
-      (error) => {
-        clearTimeout(timer);
-        reject(error);
-      },
-    );
-  });
 
 export const DriverService = {
   table: 'drivers',

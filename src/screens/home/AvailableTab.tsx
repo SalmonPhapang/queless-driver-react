@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
@@ -76,29 +76,52 @@ export const AvailableTab = () => {
   const [hasLocationPermission, setHasLocationPermission] = useState<boolean | null>(null);
   const [locationHelpVisible, setLocationHelpVisible] = useState(false);
   const [locationRequestError, setLocationRequestError] = useState<string | null>(null);
+  const alive = useRef(true);
+
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
 
   const checkLocationPermission = useCallback(async () => {
-    setHasLocationPermission(await LocationService.hasPermission());
+    try {
+      const granted = await LocationService.hasPermission();
+      if (alive.current) setHasLocationPermission(granted);
+    } catch (error) {
+      // A permission probe failure must not hide the orders list.
+      console.debug('[available] Location permission check failed:', error);
+    }
   }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
     try {
-      const [fetched, profile] = await Promise.all([
-        OrderService.fetchAvailableOrders(),
-        user ? DriverService.getDriverProfile(user.id) : Promise.resolve(null),
-      ]);
+      // Orders own this screen's loading state. The profile only controls the
+      // verification banner, so it must never block or fail the list.
+      const fetched = await OrderService.fetchAvailableOrders();
+      if (!alive.current) return;
       setOrders(fetched);
-      setDriver(profile);
-      // Orders are shown first; the passive check is deliberately un-awaited
-      // and outside this try, exactly like Flutter's `_load`.
-      void checkLocationPermission();
     } catch (error) {
-      setLoadError(`Error loading: ${errorMessage(error)}`);
+      if (alive.current) setLoadError(`Error loading: ${errorMessage(error)}`);
     } finally {
-      setLoading(false);
+      if (alive.current) setLoading(false);
     }
+
+    // Best-effort enrichment, deliberately after the list is visible.
+    if (user) {
+      void DriverService.getDriverProfile(user.id)
+        .then((profile) => {
+          if (alive.current) setDriver(profile);
+        })
+        .catch((error) => {
+          console.debug('[available] Driver profile check failed:', error);
+          if (alive.current) setDriver(null);
+        });
+    }
+    void checkLocationPermission();
   }, [checkLocationPermission, user]);
 
   useEffect(() => {
