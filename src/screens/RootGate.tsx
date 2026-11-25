@@ -64,34 +64,43 @@ export const RootGate = () => {
     void loadProfile();
   }, [loadProfile]);
 
+  const signOut = useCallback(() => {
+    setSignOutError(null);
+    void AuthService.signOut()
+      .then(() => router.replace('/welcome'))
+      .catch((failure) => {
+        const reason = errorMessage(failure);
+        setSignOutError(reason);
+        UiService.showError(`Could not sign out: ${reason}`);
+      });
+  }, []);
+
   // The native equivalent of <Navigate replace>: routing is a side effect, so
   // it runs after render and never renders a screen the driver may not see.
   let destination: string | null = null;
   if (initialized && !challenge) {
     if (!user) {
       destination = '/welcome';
-    } else if (!loading && !error) {
-      if (!driver || driver.driverStatus !== 'inactive') {
-        // DB defaults full_name to '' NOT NULL, so check both null and empty.
-        const needsOnboarding = driver == null || !driver.fullName || driver.fullName.trim() === '';
-        if (needsOnboarding) {
-          destination = '/onboarding';
-        } else {
-          const registrationSuccessSeen = Prefs.getBool(PrefKeys.registrationSuccessSeen);
-          const approvalWelcomeSeen = Prefs.getBool(PrefKeys.approvalWelcomeSeen);
-          const permissionsRequested = Prefs.getBool(PrefKeys.permissionsRequested);
+    } else if (!loading && !error && driver && driver.driverStatus !== 'inactive') {
+      // DB defaults full_name to '' NOT NULL, so check both null and empty.
+      const needsOnboarding = !driver.fullName || driver.fullName.trim() === '';
+      if (needsOnboarding) {
+        destination = '/onboarding';
+      } else {
+        const registrationSuccessSeen = Prefs.getBool(PrefKeys.registrationSuccessSeen);
+        const approvalWelcomeSeen = Prefs.getBool(PrefKeys.approvalWelcomeSeen);
+        const permissionsRequested = Prefs.getBool(PrefKeys.permissionsRequested);
 
-          if (!driver.isVerified) {
-            if (!registrationSuccessSeen) destination = '/registration-success';
-            else if (!permissionsRequested) destination = '/permissions';
-            else destination = '/home/available';
-          } else if (!approvalWelcomeSeen) {
-            destination = '/approval-success';
-          } else if (!permissionsRequested) {
-            destination = '/permissions';
-          } else {
-            destination = '/home/available';
-          }
+        if (!driver.isVerified) {
+          if (!registrationSuccessSeen) destination = '/registration-success';
+          else if (!permissionsRequested) destination = '/permissions';
+          else destination = '/home/available';
+        } else if (!approvalWelcomeSeen) {
+          destination = '/approval-success';
+        } else if (!permissionsRequested) {
+          destination = '/permissions';
+        } else {
+          destination = '/home/available';
         }
       }
     }
@@ -142,7 +151,43 @@ export const RootGate = () => {
     );
   }
 
-  if (driver && driver.driverStatus === 'inactive') {
+  // A signed-in auth user can exist without a drivers row (for example, an
+  // account created outside the app). Do not silently jump into onboarding:
+  // explain what happened and let the driver choose to create the profile.
+  if (!driver) {
+    return (
+      <Screen scroll={false} padded={false}>
+        <View style={styles.centered}>
+          <MaterialCommunityIcons name="account-question-outline" size={64} color={colors.accent} />
+          <Text style={[typography.headlineMedium, styles.boldTitle, { color: colors.text }]}>
+            No Driver Profile Found
+          </Text>
+          <Text style={[typography.bodyLarge, styles.message, { color: colors.textMuted }]}>
+            {`We couldn't find a driver profile for ${user?.email ?? 'this account'}. Fill one out to start receiving delivery offers.`}
+          </Text>
+          {signOutError && (
+            <StatusMessage
+              variant="error"
+              title="Could not sign out"
+              message={signOutError}
+              onDismiss={() => setSignOutError(null)}
+            />
+          )}
+          <View style={styles.actions}>
+            <Button
+              title="Fill Out Driver Profile"
+              variant="primary"
+              block
+              onPress={() => router.replace('/onboarding')}
+            />
+            <Button title="Log Out" variant="outline" block onPress={signOut} />
+          </View>
+        </View>
+      </Screen>
+    );
+  }
+
+  if (driver.driverStatus === 'inactive') {
     const statusName = DriverStatusX.displayName(driver.driverStatus);
     return (
       <Screen scroll={false} padded={false}>
@@ -163,21 +208,7 @@ export const RootGate = () => {
             />
           )}
           <View style={styles.logout}>
-            <Button
-              title="Log Out"
-              variant="outline"
-              block
-              onPress={() => {
-                setSignOutError(null);
-                void AuthService.signOut()
-                  .then(() => router.replace('/welcome'))
-                  .catch((signOutFailure) => {
-                    const reason = errorMessage(signOutFailure);
-                    setSignOutError(reason);
-                    UiService.showError(`Could not sign out: ${reason}`);
-                  });
-              }}
-            />
+            <Button title="Log Out" variant="outline" block onPress={signOut} />
           </View>
         </View>
       </Screen>
@@ -207,5 +238,6 @@ const styles = StyleSheet.create({
   boldTitle: { fontWeight: '800', textAlign: 'center' },
   muted: { textAlign: 'center' },
   message: { textAlign: 'center', lineHeight: 24 },
+  actions: { marginTop: 16, width: '100%', gap: 12 },
   logout: { marginTop: 16, width: '100%' },
 });

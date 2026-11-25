@@ -239,6 +239,7 @@ export const DriverOnboardingScreen = () => {
           </View>
 
           <Input
+            compact
             label="Full Name"
             value={fullName}
             error={errors.fullName}
@@ -246,21 +247,19 @@ export const DriverOnboardingScreen = () => {
             onChangeText={setFullName}
           />
 
-          <View style={styles.phoneRow}>
-            <Text style={[styles.phonePrefix, { color: colors.text }]}>+27</Text>
-            <View style={styles.phoneInput}>
-              <Input
-                label="Contact Number"
-                value={contactNumber}
-                error={errors.contactNumber}
-                keyboardType="phone-pad"
-                placeholder="082 123 4567"
-                onChangeText={setContactNumber}
-              />
-            </View>
-          </View>
+          <Input
+            compact
+            prefix="+27"
+            label="Contact Number"
+            value={contactNumber}
+            error={errors.contactNumber}
+            keyboardType="phone-pad"
+            placeholder="82 123 4567"
+            onChangeText={setContactNumber}
+          />
 
           <Input
+            compact
             label="ID Number"
             value={idNumber}
             error={errors.idNumber}
@@ -271,6 +270,7 @@ export const DriverOnboardingScreen = () => {
           />
 
           <Input
+            compact
             label="Vehicle Make (e.g. Toyota)"
             value={vehicleMake}
             error={errors.vehicleMake}
@@ -278,6 +278,7 @@ export const DriverOnboardingScreen = () => {
           />
 
           <Input
+            compact
             label="Vehicle Model (e.g. Corolla)"
             value={vehicleModel}
             error={errors.vehicleModel}
@@ -285,6 +286,7 @@ export const DriverOnboardingScreen = () => {
           />
 
           <Input
+            compact
             label="Vehicle Color"
             value={vehicleColor}
             error={errors.vehicleColor}
@@ -292,6 +294,7 @@ export const DriverOnboardingScreen = () => {
           />
 
           <Input
+            compact
             label="Vehicle Plate Number"
             value={vehiclePlate}
             error={errors.vehiclePlate}
@@ -300,6 +303,7 @@ export const DriverOnboardingScreen = () => {
           />
 
           <SelectField
+            compact
             label="Location"
             value={location}
             onChange={setLocation}
@@ -317,7 +321,6 @@ export const DriverOnboardingScreen = () => {
             </View>
             <Switch
               value={addBankDetails}
-              label="Add bank details now"
               onValueChange={(value) => {
                 setAddBankDetails(value);
                 if (value && banks.length === 0) void loadBanks();
@@ -328,6 +331,7 @@ export const DriverOnboardingScreen = () => {
           {addBankDetails && (
             <>
               <SelectField
+                compact
                 label="Select Bank"
                 value={selectedBankCode}
                 error={errors.bank}
@@ -336,12 +340,14 @@ export const DriverOnboardingScreen = () => {
                 options={banks.map((bank) => ({ value: bank.code, label: bank.name }))}
               />
               <Input
+                compact
                 label="Account Holder Name"
                 value={accountHolder}
                 error={errors.accountHolder}
                 onChangeText={setAccountHolder}
               />
               <Input
+                compact
                 label="Account Number"
                 value={accountNumber}
                 error={errors.accountNumber}
@@ -349,6 +355,7 @@ export const DriverOnboardingScreen = () => {
                 onChangeText={(value) => setAccountNumber(value.replace(/\D/g, ''))}
               />
               <SelectField
+                compact
                 label="Account Type"
                 value={accountType}
                 onChange={setAccountType}
@@ -400,8 +407,8 @@ export const DriverOnboardingScreen = () => {
 
 const styles = StyleSheet.create({
   body: { padding: 16, flexGrow: 1 },
-  form: { width: '100%', maxWidth: 460, alignSelf: 'center', gap: 16 },
-  avatarBlock: { alignItems: 'center', paddingTop: 8 },
+  form: { width: '100%', maxWidth: 460, alignSelf: 'center', gap: 10 },
+  avatarBlock: { alignItems: 'center', paddingTop: 0, paddingBottom: 2 },
   avatar: {
     width: 96,
     height: 96,
@@ -423,10 +430,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  phoneRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 4 },
-  phonePrefix: { ...typography.bodySmall, fontWeight: '700', paddingBottom: 14 },
-  phoneInput: { flex: 1 },
-  bankToggle: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 6 },
+  bankToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    minHeight: 44,
+  },
   grow: { flex: 1 },
   backdrop: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, backgroundColor: 'rgba(0,0,0,0.55)' },
   sheet: { width: '100%', maxWidth: 360, borderRadius: 16, padding: 20, gap: 10 },

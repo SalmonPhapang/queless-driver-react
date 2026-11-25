@@ -12,6 +12,8 @@ interface SelectFieldProps {
   error?: string | null;
   placeholder?: string;
   disabled?: boolean;
+  /** Tighter vertical rhythm for dense forms. */
+  compact?: boolean;
 }
 
 export function SelectField({
@@ -22,13 +24,14 @@ export function SelectField({
   error,
   placeholder,
   disabled = false,
+  compact = false,
 }: SelectFieldProps) {
   const { colors } = useTheme();
   const [open, setOpen] = useState(false);
   const selected = options.find((option) => option.value === value);
 
   return (
-    <View style={styles.group}>
+    <View style={[styles.group, compact && styles.compactGroup]}>
       <Text style={[typography.labelLarge, styles.label, { color: colors.text }]}>{label}</Text>
       <Pressable
         disabled={disabled}
@@ -76,6 +79,7 @@ export function SelectField({
 
 const styles = StyleSheet.create({
   group: { marginBottom: 14 },
+  compactGroup: { marginBottom: 0 },
   label: { marginBottom: 6 },
   control: {
     minHeight: 50,
