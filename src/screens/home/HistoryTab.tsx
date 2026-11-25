@@ -6,7 +6,7 @@ import { Button } from '../../components/Button';
 import { EmptyState } from '../../components/EmptyState';
 import { OrderCard, OrderRoute } from '../../components/OrderCard';
 import { Screen } from '../../components/Screen';
-import { Spinner } from '../../components/Spinner';
+import { DeliveryOrdersSkeleton } from '../../components/Skeleton';
 import { errorMessage } from '../../lib/errors';
 import { DeliveryOrderModel, type DeliveryOrder } from '../../models/deliveryOrder';
 import { OrderStatusX } from '../../models/statuses';
@@ -101,13 +101,7 @@ export const HistoryTab = () => {
   }, [load]);
 
   if (loading) {
-    return (
-      <Screen padded={false} scroll={false}>
-        <View style={styles.centered}>
-          <Spinner />
-        </View>
-      </Screen>
-    );
+    return <DeliveryOrdersSkeleton variant="history" />;
   }
 
   if (orders.length === 0) {

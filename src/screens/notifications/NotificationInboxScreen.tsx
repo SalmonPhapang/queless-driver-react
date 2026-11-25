@@ -6,7 +6,7 @@ import { AppBar } from '../../components/AppBar';
 import { Button } from '../../components/Button';
 import { EmptyState } from '../../components/EmptyState';
 import { Screen } from '../../components/Screen';
-import { Spinner } from '../../components/Spinner';
+import { NotificationsSkeleton } from '../../components/Skeleton';
 import type { UserNotification } from '../../models/userNotification';
 import { UserNotificationModel } from '../../models/userNotification';
 import { NotificationInboxService } from '../../services/notificationInboxService';
@@ -131,9 +131,7 @@ export const NotificationInboxScreen = () => {
       />
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {loading ? (
-          <View style={styles.center}>
-            <Spinner />
-          </View>
+          <NotificationsSkeleton />
         ) : notifications.length === 0 ? (
           <EmptyState
             title="No notifications yet"

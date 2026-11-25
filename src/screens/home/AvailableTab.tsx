@@ -6,7 +6,7 @@ import { Button } from '../../components/Button';
 import { EmptyState } from '../../components/EmptyState';
 import { OrderCard, OrderItemsRow, OrderRoute } from '../../components/OrderCard';
 import { Screen } from '../../components/Screen';
-import { Spinner } from '../../components/Spinner';
+import { DeliveryOrdersSkeleton } from '../../components/Skeleton';
 import { StatusMessage } from '../../components/StatusMessage';
 import { errorMessage } from '../../lib/errors';
 import type { DeliveryOrder } from '../../models/deliveryOrder';
@@ -130,13 +130,7 @@ export const AvailableTab = () => {
   const statusColor = OrderStatusX.color('ready_for_pickup');
 
   if (loading) {
-    return (
-      <Screen padded={false} scroll={false}>
-        <View style={styles.centered}>
-          <Spinner />
-        </View>
-      </Screen>
-    );
+    return <DeliveryOrdersSkeleton variant="available" />;
   }
 
   return (

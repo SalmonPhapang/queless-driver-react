@@ -9,7 +9,7 @@ import { Button } from '../../components/Button';
 import { Card } from '../../components/Card';
 import { EmptyState } from '../../components/EmptyState';
 import { Screen } from '../../components/Screen';
-import { Spinner } from '../../components/Spinner';
+import { SettlementRowsSkeleton, WalletSummarySkeleton } from '../../components/Skeleton';
 import { StatusMessage } from '../../components/StatusMessage';
 import { errorMessage } from '../../lib/errors';
 import { formatCurrency } from '../../lib/format';
@@ -228,9 +228,7 @@ export const WalletScreen = () => {
         )}
 
         {loading ? (
-          <View style={styles.center}>
-            <Spinner />
-          </View>
+          <WalletSummarySkeleton />
         ) : (
           <Card style={styles.hero}>
             <Text style={[typography.labelSmall, styles.eyebrow, { color: colors.primary }]}>
@@ -368,9 +366,7 @@ export const WalletScreen = () => {
           </View>
         )}
         {loadingOrders ? (
-          <View style={styles.centerPadded}>
-            <Spinner />
-          </View>
+          <SettlementRowsSkeleton />
         ) : recentOrders.length === 0 ? (
           <EmptyState
             title="No completed orders"

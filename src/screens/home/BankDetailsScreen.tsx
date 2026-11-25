@@ -6,7 +6,7 @@ import { Button } from '../../components/Button';
 import { Input } from '../../components/Input';
 import { Screen } from '../../components/Screen';
 import { SelectField } from '../../components/SelectField';
-import { Spinner } from '../../components/Spinner';
+import { BankDetailsFormSkeleton } from '../../components/Skeleton';
 import { StatusMessage } from '../../components/StatusMessage';
 import { errorMessage } from '../../lib/errors';
 import type { BankDetails, PaystackBank } from '../../services/payoutService';
@@ -126,9 +126,7 @@ export const BankDetailsScreen = () => {
       />
       <View style={styles.body}>
         {loading ? (
-          <View style={styles.center}>
-            <Spinner />
-          </View>
+          <BankDetailsFormSkeleton />
         ) : (
           <View style={styles.form}>
             <Text style={[typography.bodySmall, styles.intro, { color: colors.textMuted }]}>

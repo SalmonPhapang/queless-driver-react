@@ -11,7 +11,8 @@ import { Card } from '../../components/Card';
 import { Input } from '../../components/Input';
 import { Screen } from '../../components/Screen';
 import { SelectField } from '../../components/SelectField';
-import { LoadingScreen, Spinner } from '../../components/Spinner';
+import { ProfileSkeleton } from '../../components/Skeleton';
+import { Spinner } from '../../components/Spinner';
 import { StatusMessage } from '../../components/StatusMessage';
 import { Switch } from '../../components/Switch';
 import { UpdateDialog } from '../../components/UpdateDialog';
@@ -295,7 +296,7 @@ export const ProfileTab = () => {
   };
 
   if (loading) {
-    return <LoadingScreen />;
+    return <ProfileSkeleton />;
   }
 
   const isOnline = driver?.driverStatus === 'online';

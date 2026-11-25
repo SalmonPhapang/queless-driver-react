@@ -8,7 +8,7 @@ import { Card } from '../../components/Card';
 import { Input } from '../../components/Input';
 import { Screen } from '../../components/Screen';
 import { SelectField } from '../../components/SelectField';
-import { Spinner } from '../../components/Spinner';
+import { OrderDetailsSkeleton } from '../../components/Skeleton';
 import { StatusIcon } from '../../components/StatusIcon';
 import { StatusMessage } from '../../components/StatusMessage';
 import { SupabaseConfig } from '../../config/supabaseClient';
@@ -509,13 +509,7 @@ export const OrderDetailsScreen = () => {
   };
 
   if (loading) {
-    return (
-      <Screen padded={false} scroll={false}>
-        <View style={styles.centered}>
-          <Spinner />
-        </View>
-      </Screen>
-    );
+    return <OrderDetailsSkeleton onBack={goBack} />;
   }
 
   if (!order) {

@@ -8,7 +8,7 @@ import { Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Button } from '../../components/Button';
 import { Card } from '../../components/Card';
 import { Screen } from '../../components/Screen';
-import { Spinner } from '../../components/Spinner';
+import { PermissionRequestSkeleton } from '../../components/Skeleton';
 import { AppConfig } from '../../config/appConfig';
 import { errorMessage } from '../../lib/errors';
 import { Prefs, PrefKeys } from '../../lib/storage';
@@ -179,13 +179,7 @@ export const PermissionRequestScreen = () => {
   };
 
   if (loading) {
-    return (
-      <Screen scroll={false} padded={false}>
-        <View style={styles.loading}>
-          <Spinner />
-        </View>
-      </Screen>
-    );
+    return <PermissionRequestSkeleton />;
   }
 
   return (
