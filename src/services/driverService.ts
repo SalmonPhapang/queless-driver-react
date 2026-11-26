@@ -3,6 +3,11 @@
 import { SupabaseConfig } from '../config/supabaseClient';
 import { withTimeout } from '../lib/async';
 import { Driver, DriverModel } from '../models/driver';
+import {
+  contentTypeForExtension,
+  detectImageExtension,
+  readImageBytes,
+} from '../utils/imageBytes';
 import { PushService } from './pushService';
 
 export const DriverService = {
@@ -122,12 +127,14 @@ export const DriverService = {
   },
 
   async uploadProfileImage(userId: string, imageUri: string): Promise<string> {
-    const fileName = `${userId}_${Date.now()}.jpg`;
+    const bytes = await readImageBytes(imageUri);
+    const extension = detectImageExtension(bytes) || 'jpg';
+    const fileName = `${userId}_${Date.now()}.${extension}`;
     const path = `driver/${fileName}`;
-    const response = await fetch(imageUri);
-    const body = await response.blob();
     const bucket = SupabaseConfig.client.storage.from('driver');
-    const { error } = await bucket.upload(path, body, { contentType: 'image/jpeg' });
+    const { error } = await bucket.upload(path, bytes, {
+      contentType: contentTypeForExtension(extension),
+    });
     if (error) throw error;
     return bucket.getPublicUrl(path).data.publicUrl;
   },
