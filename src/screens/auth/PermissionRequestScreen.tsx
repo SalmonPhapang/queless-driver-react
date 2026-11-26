@@ -19,15 +19,26 @@ import { UiService } from '../../services/uiService';
 import { useTheme } from '../../theme/ThemeContext';
 import { typography } from '../../theme/typography';
 
+type PermissionKind = 'location' | 'notifications' | 'camera' | 'photos' | 'battery';
+
+interface PermissionState {
+  location: boolean;
+  notifications: boolean;
+  camera: boolean;
+  photos: boolean;
+  battery: boolean;
+}
+
 interface TileProps {
   icon: ReactNode;
   title: string;
   description: string;
   granted: boolean;
+  busy: boolean;
   onAllow: () => void;
 }
 
-const PermissionTile = ({ icon, title, description, granted, onAllow }: TileProps) => {
+const PermissionTile = ({ icon, title, description, granted, busy, onAllow }: TileProps) => {
   const { colors } = useTheme();
   return (
     <Card style={styles.tile}>
@@ -39,62 +50,71 @@ const PermissionTile = ({ icon, title, description, granted, onAllow }: TileProp
       {granted ? (
         <MaterialCommunityIcons name="check-circle" size={24} color={colors.success} />
       ) : (
-        <Button title="Allow" variant="primary" size="sm" onPress={onAllow} />
+        <Button
+          title={busy ? 'Requesting…' : 'Allow Access'}
+          variant="primary"
+          size="sm"
+          onPress={onAllow}
+          disabled={busy}
+        />
       )}
     </Card>
   );
 };
 
-/** Port of lib/screens/auth/permission_request_screen.dart. */
+/**
+ * Port of lib/screens/auth/permission_request_screen.dart: one tile per
+ * permission, one OS prompt per tap, and Continue only once every required
+ * tile is granted. Role-specific tiles keep the same staged pattern.
+ */
 export const PermissionRequestScreen = () => {
   const { colors } = useTheme();
-  const [locationGranted, setLocationGranted] = useState(false);
-  const [notificationsGranted, setNotificationsGranted] = useState(!AppConfig.remotePushAvailable);
-  const [cameraGranted, setCameraGranted] = useState(false);
-  const [photosGranted, setPhotosGranted] = useState(false);
-  const [batteryGranted, setBatteryGranted] = useState(false);
+  const [state, setState] = useState<PermissionState>({
+    location: false,
+    notifications: !AppConfig.remotePushAvailable,
+    camera: false,
+    photos: false,
+    battery: false,
+  });
   const [loading, setLoading] = useState(true);
+  const [requesting, setRequesting] = useState<PermissionKind | null>(null);
+
+  const allGranted = (value: PermissionState): boolean =>
+    value.location &&
+    value.notifications &&
+    value.camera &&
+    value.photos &&
+    value.battery;
 
   const proceed = () => {
     Prefs.setBool(PrefKeys.permissionsRequested, true);
-    // Flutter pushes RootRouter here so every gate is re-evaluated.
+    // Flutter pushes RootGate here so every gate is re-evaluated.
     router.replace('/');
   };
-
-  const allGranted = (state: {
-    location: boolean;
-    notifications: boolean;
-    camera: boolean;
-    photos: boolean;
-    battery: boolean;
-  }): boolean =>
-    state.location && state.notifications && state.camera && state.photos && state.battery;
 
   useEffect(() => {
     void (async () => {
       try {
-        const location = (await Location.getForegroundPermissionsAsync()).status === 'granted';
-        const notifications = await PushService.isAuthorized();
-        const battery = await BatteryService.isExempted();
-
-        // Camera and photo tiles start as "not granted" until the driver taps
-        // Allow, matching the web port and the Flutter screen's initState.
-        setLocationGranted(location);
-        setNotificationsGranted(notifications);
-        setBatteryGranted(battery);
-        setLoading(false);
-
-        if (
-          allGranted({
-            location,
-            notifications,
-            camera: false,
-            photos: false,
-            battery,
-          })
-        ) {
-          proceed();
+        let camera = false;
+        let photos = false;
+        try {
+          camera = (await ImagePicker.getCameraPermissionsAsync()).granted;
+          photos = (await ImagePicker.getMediaLibraryPermissionsAsync()).granted;
+        } catch (error) {
+          console.debug('Could not read gallery permission state:', error);
         }
+
+        const next: PermissionState = {
+          location: (await Location.getForegroundPermissionsAsync()).status === 'granted',
+          notifications: await PushService.isAuthorized(),
+          camera,
+          photos,
+          battery: await BatteryService.isExempted(),
+        };
+        setState(next);
+        setLoading(false);
+        // Like Flutter, skip the screen when everything is already granted.
+        if (allGranted(next)) proceed();
       } catch (error) {
         setLoading(false);
         UiService.showError(`Error checking permissions: ${errorMessage(error)}`);
@@ -104,78 +124,44 @@ export const PermissionRequestScreen = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const checkAndProceed = (next: {
-    location?: boolean;
-    notifications?: boolean;
-    camera?: boolean;
-    photos?: boolean;
-    battery?: boolean;
-  }) => {
-    if (
-      allGranted({
-        location: next.location ?? locationGranted,
-        notifications: next.notifications ?? notificationsGranted,
-        camera: next.camera ?? cameraGranted,
-        photos: next.photos ?? photosGranted,
-        battery: next.battery ?? batteryGranted,
-      })
-    ) {
-      proceed();
-    }
-  };
-
-  const requestLocation = async () => {
-    const result = await Location.requestForegroundPermissionsAsync();
-    const granted = result.status === 'granted';
-    setLocationGranted(granted);
-    checkAndProceed({ location: granted });
-  };
-
-  const requestNotifications = async () => {
-    const granted = await PushService.requestPermission();
-    setNotificationsGranted(granted);
-    if (granted && AppConfig.remotePushAvailable) await AuthService.syncFcmToken();
-    checkAndProceed({ notifications: granted });
-  };
-
-  const requestCamera = async () => {
-    let granted = false;
+  const request = async (kind: PermissionKind) => {
+    setRequesting(kind);
     try {
-      granted = (await ImagePicker.requestCameraPermissionsAsync()).granted;
-    } catch (error) {
-      console.debug('Camera permission was not granted:', error);
-    }
-    setCameraGranted(granted);
-    checkAndProceed({ camera: granted });
-  };
-
-  const requestPhotos = async () => {
-    let granted = false;
-    try {
-      granted = (await ImagePicker.requestMediaLibraryPermissionsAsync()).granted;
-    } catch (error) {
-      console.debug('Photo library permission was not granted:', error);
-    }
-    setPhotosGranted(granted);
-    checkAndProceed({ photos: granted });
-  };
-
-  const requestBattery = async () => {
-    let granted = false;
-    try {
-      // iOS has no battery-optimisation exemption to grant. On Android the
-      // settings screen is opened, then BatteryService persists the flag.
-      if (Platform.OS === 'android') {
-        await BatteryService.openBatterySettings();
-        granted = await BatteryService.requestExemption();
-      } else {
-        granted = await BatteryService.showExemptionDialog();
+      let granted = false;
+      switch (kind) {
+        case 'location':
+          granted = (await Location.requestForegroundPermissionsAsync()).status === 'granted';
+          break;
+        case 'notifications':
+          granted = await PushService.requestPermission();
+          if (granted && AppConfig.remotePushAvailable) await AuthService.syncFcmToken();
+          break;
+        case 'camera':
+          granted = (await ImagePicker.requestCameraPermissionsAsync()).granted;
+          break;
+        case 'photos':
+          granted = (await ImagePicker.requestMediaLibraryPermissionsAsync()).granted;
+          break;
+        case 'battery':
+          // iOS has no battery-optimisation exemption to grant. On Android the
+          // settings screen is opened, then BatteryService persists the flag.
+          if (Platform.OS === 'android') {
+            await BatteryService.openBatterySettings();
+            granted = await BatteryService.requestExemption();
+          } else {
+            granted = await BatteryService.showExemptionDialog();
+          }
+          break;
       }
+
+      const next = { ...state, [kind]: granted };
+      setState(next);
+      if (allGranted(next)) proceed();
     } catch (error) {
-      console.debug('Battery exemption dialog failed:', error);
+      console.debug(`${kind} permission was not granted:`, error);
+    } finally {
+      setRequesting(null);
     }
-    setBatteryGranted(granted);
-    checkAndProceed({ battery: granted });
   };
 
   if (loading) {
@@ -197,45 +183,57 @@ export const PermissionRequestScreen = () => {
             icon={<MaterialCommunityIcons name="map-marker" size={22} color={colors.accent} />}
             title="Location Access"
             description="We use your location to find nearby stores and track your delivery in real-time."
-            granted={locationGranted}
-            onAllow={() => void requestLocation()}
+            granted={state.location}
+            busy={requesting === 'location'}
+            onAllow={() => void request('location')}
           />
           <PermissionTile
             icon={<MaterialCommunityIcons name="camera" size={22} color={colors.accent} />}
             title="Camera Access"
             description="Required for capturing your profile photo and scanning documents."
-            granted={cameraGranted}
-            onAllow={() => void requestCamera()}
+            granted={state.camera}
+            busy={requesting === 'camera'}
+            onAllow={() => void request('camera')}
           />
           <PermissionTile
             icon={<MaterialCommunityIcons name="image" size={22} color={colors.accent} />}
             title="Photo Gallery Access"
             description="Required for uploading your profile picture from your device."
-            granted={photosGranted}
-            onAllow={() => void requestPhotos()}
+            granted={state.photos}
+            busy={requesting === 'photos'}
+            onAllow={() => void request('photos')}
           />
           {AppConfig.remotePushAvailable && (
             <PermissionTile
               icon={<MaterialCommunityIcons name="bell-ring" size={22} color={colors.accent} />}
               title="Notifications"
               description="Get real-time updates about new orders, delivery status, and important alerts."
-              granted={notificationsGranted}
-              onAllow={() => void requestNotifications()}
+              granted={state.notifications}
+              busy={requesting === 'notifications'}
+              onAllow={() => void request('notifications')}
             />
           )}
-          {locationGranted && (
+          {state.location && (
             <PermissionTile
               icon={<MaterialCommunityIcons name="battery-charging" size={22} color={colors.accent} />}
               title="Battery Optimisation"
               description="Allow Queless to run in the background so your location stays live when using other apps like Google Maps."
-              granted={batteryGranted}
-              onAllow={() => void requestBattery()}
+              granted={state.battery}
+              busy={requesting === 'battery'}
+              onAllow={() => void request('battery')}
             />
           )}
         </View>
 
-        <View style={styles.skip}>
-          <Button title="Skip for now" variant="ghost" size="sm" onPress={proceed} />
+        <View style={styles.actions}>
+          <Button
+            title="Continue"
+            variant="primary"
+            block
+            onPress={proceed}
+            disabled={!allGranted(state) || requesting !== null}
+          />
+          <Button title="Skip for now" variant="ghost" size="sm" onPress={proceed} disabled={requesting !== null} />
         </View>
       </ScrollView>
     </Screen>
@@ -243,8 +241,6 @@ export const PermissionRequestScreen = () => {
 };
 
 const styles = StyleSheet.create({
-  loading: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  body: { paddingTop: 56, paddingBottom: 32, paddingHorizontal: 24, flexGrow: 1 },
   title: { fontSize: 28, fontWeight: '700' },
   subtitle: { marginTop: 12, lineHeight: 24 },
   tiles: { marginTop: 32, gap: 12 },
@@ -252,5 +248,6 @@ const styles = StyleSheet.create({
   tileIcon: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   tileTitle: { fontWeight: '700' },
   grow: { flex: 1 },
-  skip: { alignItems: 'center', marginTop: 32 },
+  actions: { gap: 8, marginTop: 32 },
+  body: { paddingTop: 56, paddingBottom: 32, paddingHorizontal: 24, flexGrow: 1 },
 });
