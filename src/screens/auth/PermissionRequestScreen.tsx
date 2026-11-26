@@ -79,12 +79,14 @@ export const PermissionRequestScreen = () => {
   const [loading, setLoading] = useState(true);
   const [requesting, setRequesting] = useState<PermissionKind | null>(null);
 
+  // Battery optimisation is Android-only; iOS has no OS-level equivalent.
+  const requiresBattery = Platform.OS === 'android';
   const allGranted = (value: PermissionState): boolean =>
     value.location &&
     value.notifications &&
     value.camera &&
     value.photos &&
-    value.battery;
+    (!requiresBattery || value.battery);
 
   const proceed = () => {
     Prefs.setBool(PrefKeys.permissionsRequested, true);
@@ -213,7 +215,7 @@ export const PermissionRequestScreen = () => {
               onAllow={() => void request('notifications')}
             />
           )}
-          {state.location && (
+          {requiresBattery && state.location && (
             <PermissionTile
               icon={<MaterialCommunityIcons name="battery-charging" size={22} color={colors.accent} />}
               title="Battery Optimisation"

@@ -1,6 +1,9 @@
-// Native port of lib/services/battery_service.dart.
-// iOS has no battery-optimisation exemption. Android opens device settings and
-// remembers that the driver was walked through the request.
+// Android battery optimisation is not a runtime permission: there is no OS
+// dialog to request. The only supported action is opening the app's settings
+// where the driver can turn optimisation off. iOS has no equivalent, so the
+// permission screen does not show a battery tile there.
+// The stored flag records that the driver was walked through the settings step;
+// Android does not expose the current exemption state to a JS-only app.
 
 import { Linking, Platform } from 'react-native';
 import { Prefs, PrefKeys } from '../lib/storage';

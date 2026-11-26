@@ -30,6 +30,7 @@
         "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_LOCATION",
+        "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO"
       ],
       "predictiveBackGestureEnabled": false
@@ -51,7 +52,13 @@
           "color": "#D13540"
         }
       ],
-      "expo-image-picker",
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "Queless Driver uses the camera to add your profile photo.",
+          "photosPermission": "Queless Driver uses your photos to add a profile picture."
+        }
+      ],
       "expo-background-task",
       "expo-task-manager",
       "expo-font",
