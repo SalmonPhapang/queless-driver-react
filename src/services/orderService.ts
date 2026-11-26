@@ -342,6 +342,46 @@ export const OrderService = {
     }
   },
 
+  /**
+   * Upsert the per-driver row used by `nearby_eligible_drivers` for dispatch.
+   * This is the only write an online-but-idle driver needs: no order is active
+   * yet, so there is no assignment row to update.
+   */
+  async publishDriverLocation({
+    driverId,
+    lat,
+    lng,
+    accuracy,
+    speed,
+    heading,
+    timestamp = nowIso(),
+  }: {
+    driverId: string;
+    lat: number;
+    lng: number;
+    accuracy?: number | null;
+    speed?: number | null;
+    heading?: number | null;
+    timestamp?: string;
+  }): Promise<void> {
+    const { error } = await SupabaseConfig.client
+      .from('driver_locations')
+      .upsert(
+        {
+          driver_id: driverId,
+          current_lat: lat,
+          current_lng: lng,
+          last_location_update: timestamp,
+          ...(accuracy == null ? {} : { location_accuracy: accuracy }),
+          ...(speed == null ? {} : { location_speed: speed }),
+          ...(heading == null ? {} : { location_heading: heading }),
+          updated_at: timestamp,
+        },
+        { onConflict: 'driver_id' },
+      );
+    if (error) throw error;
+  },
+
   async updateDriverLocation({
     orderIds,
     orderId,
@@ -353,7 +393,7 @@ export const OrderService = {
     heading,
   }: {
     orderIds: string[];
-    orderId: string;
+    orderId?: string;
     driverId: string;
     lat: number;
     lng: number;
@@ -362,45 +402,42 @@ export const OrderService = {
     heading?: number | null;
   }): Promise<void> {
     const timestamp = nowIso();
-    const targets = orderIds.length === 0 ? [orderId] : orderIds;
+    const targets = orderIds.length > 0 ? orderIds : orderId ? [orderId] : [];
 
-    const payload: Record<string, unknown> = {
-      current_lat: lat,
-      current_lng: lng,
-      last_location_update: timestamp,
-      ...(accuracy == null ? {} : { location_accuracy: accuracy }),
-      ...(speed == null ? {} : { location_speed: speed }),
-      ...(heading == null ? {} : { location_heading: heading }),
-      updated_at: timestamp,
-    };
+    if (targets.length > 0) {
+      const payload: Record<string, unknown> = {
+        current_lat: lat,
+        current_lng: lng,
+        last_location_update: timestamp,
+        ...(accuracy == null ? {} : { location_accuracy: accuracy }),
+        ...(speed == null ? {} : { location_speed: speed }),
+        ...(heading == null ? {} : { location_heading: heading }),
+        updated_at: timestamp,
+      };
 
-    // One batched UPDATE covering every tracked order.
-    const { error } = await SupabaseConfig.client
-      .from(OrderService.assignmentsTable)
-      .update(payload)
-      .eq('driver_id', driverId)
-      .in('order_id', targets);
-    if (error) throw error;
+      // One batched UPDATE covering every tracked order.
+      const { error } = await SupabaseConfig.client
+        .from(OrderService.assignmentsTable)
+        .update(payload)
+        .eq('driver_id', driverId)
+        .in('order_id', targets);
+      if (error) throw error;
+    }
 
-    // Keep the per-driver live row fresh too. Non-critical: the per-order rows
-    // above are the source of truth.
+    // Keep the per-driver live row fresh too. Non-critical during an active
+    // delivery: the mirror trigger on driver_assignments writes the same fix.
+    // Online-idle presence calls publishDriverLocation directly so failures are
+    // surfaced there instead of being swallowed.
     try {
-      const { error: locationError } = await SupabaseConfig.client
-        .from('driver_locations')
-        .upsert(
-          {
-            driver_id: driverId,
-            current_lat: lat,
-            current_lng: lng,
-            last_location_update: timestamp,
-            ...(accuracy == null ? {} : { location_accuracy: accuracy }),
-            ...(speed == null ? {} : { location_speed: speed }),
-            ...(heading == null ? {} : { location_heading: heading }),
-            updated_at: timestamp,
-          },
-          { onConflict: 'driver_id' },
-        );
-      if (locationError) throw locationError;
+      await OrderService.publishDriverLocation({
+        driverId,
+        lat,
+        lng,
+        accuracy,
+        speed,
+        heading,
+        timestamp,
+      });
     } catch (error) {
       console.debug('driver_locations upsert skipped (non-critical):', error);
     }

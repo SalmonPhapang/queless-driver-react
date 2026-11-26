@@ -24,6 +24,7 @@ import type { AppVersion } from '../../models/appVersion';
 import type { Driver } from '../../models/driver';
 import { AuthService } from '../../services/authService';
 import { DriverService } from '../../services/driverService';
+import { LocationService } from '../../services/locationService';
 import { OrderService } from '../../services/orderService';
 import { PayoutService } from '../../services/payoutService';
 import { UiService } from '../../services/uiService';
@@ -133,6 +134,15 @@ export const ProfileTab = () => {
         setVehiclePlate(driverProfile.vehiclePlate ?? '');
         setIdNumber(driverProfile.idNumber ?? '');
         setSelectedLocation(driverProfile.location ?? null);
+
+        // An already-online driver is still dispatchable after an app restart.
+        // This path never prompts; it only refreshes an existing permission.
+        void LocationService.syncDriverPresence({
+          driverId: user.id,
+          driverStatus: driverProfile.driverStatus ?? '',
+        }).catch((error) => {
+          console.debug('[profile] Presence sync failed:', error);
+        });
       }
     } catch (error) {
       if (!alive.current) return;
@@ -318,16 +328,37 @@ export const ProfileTab = () => {
     const nextStatus = pendingStatus;
     setIsUpdatingStatus(true);
     try {
+      if (nextStatus) {
+        // Publish before the status flip so the first dispatch query already
+        // sees a fresh fix, and enable background tracking for app suspension.
+        const presence = await LocationService.startOnlinePresence(user.id);
+        if (!presence.ok) {
+          UiService.showError(
+            'Location access is needed to receive nearby delivery offers. Enable it and try again.',
+          );
+          setPendingStatus(null);
+          return;
+        }
+        if (!presence.backgroundTracking) {
+          UiService.showInfo(
+            'Your location is shared while the app is open. Allow background location to keep receiving offers when the app is in the background.',
+            { duration: 6000 },
+          );
+        }
+      }
+
       await DriverService.updateOnlineStatus(user.id, nextStatus);
       if (!alive.current) return;
       setDriver((current) =>
         current ? { ...current, driverStatus: nextStatus ? 'online' : 'offline' } : current,
       );
       setPendingStatus(null);
+      if (!nextStatus) await LocationService.stopOnlinePresence();
       void loadProfile();
     } catch (error) {
       if (!alive.current) return;
       setPendingStatus(null);
+      if (nextStatus) await LocationService.stopOnlinePresence().catch(() => undefined);
       UiService.showError(`Status update failed: ${errorMessage(error)}`);
     } finally {
       if (alive.current) setIsUpdatingStatus(false);
@@ -747,9 +778,9 @@ export const ProfileTab = () => {
         message={
           pendingStatus === true
             ? isVerified
-              ? "You'll start receiving new delivery offers right away. Make sure you're ready to head to the pickup."
+              ? "Your live location will be shared while you're online so nearby orders can reach you. Keep background location enabled; force-closing the app may pause offers."
               : "You'll appear online, but accepting orders stays locked until your profile is verified."
-            : "You'll stop receiving new delivery offers until you switch back online."
+            : "You'll stop receiving new delivery offers and location sharing until you switch back online."
         }
         confirmLabel={pendingStatus === true ? 'GO ONLINE' : 'GO OFFLINE'}
         tone={pendingStatus === true ? 'success' : 'warning'}

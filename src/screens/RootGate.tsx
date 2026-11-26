@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { router } from 'expo-router';
-import { StyleSheet, Text, View } from 'react-native';
+import { AppState, StyleSheet, Text, View } from 'react-native';
 import {
   completeDeviceChallenge,
   DeviceVerificationModal,
@@ -18,6 +18,7 @@ import type { Driver } from '../models/driver';
 import { DriverStatusX } from '../models/statuses';
 import { AuthService } from '../services/authService';
 import { DriverService } from '../services/driverService';
+import { LocationService } from '../services/locationService';
 import { UiService } from '../services/uiService';
 import { useAuthStore } from '../stores/authStore';
 import { useTheme } from '../theme/ThemeContext';
@@ -63,6 +64,36 @@ export const RootGate = () => {
   useEffect(() => {
     void loadProfile();
   }, [loadProfile]);
+
+  // Restore online presence on app start and refresh the fix when the app
+  // returns from the background. Force-killed apps cannot publish; the backend
+  // 15-minute freshness window naturally excludes them until they reopen.
+  const driverStatus = driver?.driverStatus ?? '';
+  const hasDriver = Boolean(driver);
+  useEffect(() => {
+    if (!user || !hasDriver) {
+      void LocationService.stopOnlinePresence().catch((error) => {
+        console.debug('[presence] Stop failed:', error);
+      });
+      return;
+    }
+
+    void LocationService.syncDriverPresence({
+      driverId: user.id,
+      driverStatus,
+    }).catch((error) => {
+      console.debug('[presence] Sync failed:', error);
+    });
+
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') {
+        void LocationService.refreshOnlinePresence().catch((error) => {
+          console.debug('[presence] Resume refresh failed:', error);
+        });
+      }
+    });
+    return () => subscription.remove();
+  }, [user, hasDriver, driverStatus]);
 
   const signOut = useCallback(() => {
     setSignOutError(null);

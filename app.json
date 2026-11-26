@@ -44,7 +44,16 @@
           }
         }
       ],
-      "expo-location",
+      [
+        "expo-location",
+        {
+          "isIosBackgroundLocationEnabled": true,
+          "isAndroidBackgroundLocationEnabled": true,
+          "locationWhenInUsePermission": "Queless Driver uses your location to find nearby orders and show your live location during deliveries.",
+          "locationAlwaysAndWhenInUsePermission": "While you are online, Queless Driver uses your location in the background so nearby delivery offers can reach you.",
+          "locationAlwaysPermission": "While you are online, Queless Driver uses your location in the background so nearby delivery offers can reach you."
+        }
+      ],
       [
         "expo-notifications",
         {
