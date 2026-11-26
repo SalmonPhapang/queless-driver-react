@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "Queless Driver",
-    "slug": "queless-driver-mobile",
+    "slug": "queless-driver",
     "version": "1.0.1",
     "orientation": "portrait",
     "platforms": ["ios", "android"],
@@ -96,9 +96,9 @@
     ],
     "extra": {
       "eas": {
-        "projectId": "ccc4dfcb-0bbc-4d1e-8ae4-a69572cddf88"
+        "projectId": "6150ba97-2eec-4dca-a848-35880ba12523"
       }
     },
-    "owner": "developers_sourcecodes"
+    "owner": "salmonphapangs-team"
   }
 }

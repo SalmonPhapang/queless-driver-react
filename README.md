@@ -36,8 +36,8 @@ disabled there; the Supabase realtime order bridge still drives the app. Use a
 development build when testing push alerts, native Sentry, or hidden system bars.
 
 Native builds require a development client. The EAS project is
-`@developers_sourcecodes/queless-driver-mobile`
-(ID `ccc4dfcb-0bbc-4d1e-8ae4-a69572cddf88`).
+`@salmonphapangs-team/queless-driver`
+(ID `6150ba97-2eec-4dca-a848-35880ba12523`).
 
 Scripts (run from the repository root):
 
