@@ -95,6 +95,24 @@ export const NotificationInboxService = {
     }
   },
 
+  /** Close out the dispatch-offer rows once the driver has claimed the order. */
+  async markOrderOffersRead(orderId: string): Promise<void> {
+    const uid = currentUserId();
+    if (!uid) return;
+    try {
+      const { error } = await SupabaseConfig.client
+        .from('notifications')
+        .update({ is_read: true, updated_at: new Date().toISOString() })
+        .eq('user_id', uid)
+        .eq('order_id', orderId)
+        .eq('type', 'dispatch_offer')
+        .eq('is_read', false);
+      if (error) throw error;
+    } catch (error) {
+      console.debug(`Driver inbox: markOrderOffersRead failed order=${orderId}:`, error);
+    }
+  },
+
   async markAllRead(): Promise<void> {
     const uid = currentUserId();
     if (!uid) return;

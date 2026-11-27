@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Linking, StyleSheet, View } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { Button } from '../../components/Button';
 import { DeliveryEmptyState } from '../../components/DeliveryEmptyState';
 import { OrderCard, OrderItemsRow, OrderRoute } from '../../components/OrderCard';
@@ -101,9 +101,13 @@ export const ActiveTab = () => {
     });
   }, [user]);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  // Tabs stay mounted, so a plain mount effect leaves this list stale after
+  // accepting an order from Available or a notification. Reload on focus.
+  useFocusEffect(
+    useCallback(() => {
+      void load();
+    }, [load]),
+  );
 
   const pickUp = async (order: DeliveryOrder) => {
     setActionError(null);

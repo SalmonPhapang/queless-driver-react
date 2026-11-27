@@ -21,6 +21,7 @@ import { ORDER_STATUSES, OrderStatusX, type OrderStatus } from '../../models/sta
 import { BackgroundLocationService } from '../../services/backgroundLocationService';
 import { DriverService } from '../../services/driverService';
 import { LocationService } from '../../services/locationService';
+import { NotificationInboxService } from '../../services/notificationInboxService';
 import { OrderService } from '../../services/orderService';
 import { UiService } from '../../services/uiService';
 import { useAuthStore } from '../../stores/authStore';
@@ -405,7 +406,14 @@ export const OrderDetailsScreen = () => {
   }, [openOffer]);
 
   const syncTracking = async () => {
-    if (user) await LocationService.syncTrackingForDriver({ driverId: user.id });
+    if (!user) return;
+    try {
+      await LocationService.syncTrackingForDriver({ driverId: user.id });
+    } catch (error) {
+      // A completed status change must not be rolled back in the UI just
+      // because a background tracking refresh failed.
+      console.debug('[order] Tracking sync failed:', error);
+    }
   };
 
   const adminUpdateStatus = async (newStatus: OrderStatus, message?: string) => {
@@ -475,6 +483,13 @@ export const OrderDetailsScreen = () => {
       }
 
       await syncTracking();
+
+      if (action === 'accept') {
+        await NotificationInboxService.markOrderOffersRead(order.id);
+        await UiService.showSuccess('Order accepted. It is now in your Active list.');
+        router.replace('/home/active');
+        return;
+      }
 
       if (action === 'deliver') {
         await UiService.showSuccessDialog({
