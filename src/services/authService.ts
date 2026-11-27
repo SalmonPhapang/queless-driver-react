@@ -43,6 +43,9 @@ export const AuthService = {
 
       if (user) {
         if (AppConfig.featureFirebase) {
+          // Watch the durable inbox before any push-token work so a driver
+          // with denied notifications still sees/ hears foreground offers.
+          PushService.watchNotifications(user.id);
           void PushService.registerDriver(user.id);
         }
         // Cold start is where a lost or replaced device is caught.
@@ -115,6 +118,7 @@ export const AuthService = {
       }
 
       if (AppConfig.featureFirebase) {
+        PushService.watchNotifications(user.id);
         await PushService.registerDriver(user.id);
       }
     }

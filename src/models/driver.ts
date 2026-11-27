@@ -20,6 +20,8 @@ export interface Driver {
   idNumber?: string | null;
   location?: string | null;
   isVerified: boolean;
+  /** Soft-deleted profiles stay visible for history but receive no offers. */
+  deletedAt?: string | null;
   bankDetails?: Record<string, unknown> | null;
   paystackRecipientCode?: string | null;
   paystackSubaccountCode?: string | null;
@@ -46,6 +48,7 @@ export const DriverModel = {
       idNumber: str(json.id_number),
       location: str(json.location),
       isVerified: json.is_verified === true,
+      deletedAt: str(json.deleted_at),
       bankDetails:
         json.bank_details && typeof json.bank_details === 'object'
           ? (json.bank_details as Record<string, unknown>)

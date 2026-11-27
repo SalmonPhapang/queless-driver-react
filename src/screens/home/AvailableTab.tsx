@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { Avatar } from '../../components/Avatar';
 import { Badge } from '../../components/Badge';
 import { Button } from '../../components/Button';
@@ -10,6 +10,7 @@ import { OrderCard, OrderItemsRow, OrderRoute } from '../../components/OrderCard
 import { Screen } from '../../components/Screen';
 import { DeliveryOrdersSkeleton } from '../../components/Skeleton';
 import { StatusMessage } from '../../components/StatusMessage';
+import { SupabaseConfig } from '../../config/supabaseClient';
 import { errorMessage } from '../../lib/errors';
 import type { DeliveryOrder } from '../../models/deliveryOrder';
 import type { Driver } from '../../models/driver';
@@ -153,10 +154,41 @@ export const AvailableTab = () => {
     void checkLocationPermission();
   }, [checkLocationPermission, user]);
 
+  // Tabs stay mounted. Reload whenever this tab regains focus so a store that
+  // releases an order while the driver is on another tab shows up immediately.
+  useFocusEffect(
+    useCallback(() => {
+      void load();
+    }, [load]),
+  );
+
+  // Live refresh: an order leaving `preparing` for `ready_for_pickup`, or a
+  // dispatch row being added/closed, must update the list without waiting for
+  // the driver to pull to refresh or restart the app.
   useEffect(() => {
-    void checkLocationPermission();
-    void load();
-  }, [checkLocationPermission, load]);
+    const channel = SupabaseConfig.client
+      .channel(`driver-available-orders-${user?.id ?? 'anon'}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'orders',
+          filter: 'status=eq.ready_for_pickup',
+        },
+        () => void load(),
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'driver_assignments' },
+        () => void load(),
+      )
+      .subscribe();
+
+    return () => {
+      void SupabaseConfig.client.removeChannel(channel);
+    };
+  }, [load, user?.id]);
 
   const requestLocation = async () => {
     setLocationRequestError(null);
@@ -200,6 +232,10 @@ export const AvailableTab = () => {
 
   const isVerified = driver?.isVerified ?? false;
   const isOnline = driver?.driverStatus === 'online';
+  // Dispatch only considers active, non-deleted `driver` profiles. Admins and
+  // soft-deleted test profiles can browse orders but will never be offered one.
+  const offersPaused =
+    driver != null && (Boolean(driver.deletedAt) || driver.roleType !== 'driver');
   const statusColor = OrderStatusX.color('ready_for_pickup');
   const greetingName = firstNameOf(
     driver?.fullName?.trim() || user?.email?.split('@')[0] || undefined,
@@ -314,6 +350,16 @@ export const AvailableTab = () => {
             message={locationRequestError}
             onRetry={() => void requestLocation()}
           />
+        )}
+
+        {offersPaused && (
+          <View style={[styles.banner, { backgroundColor: colors.errorContainer }]}>
+            <MaterialCommunityIcons name="account-off-outline" size={20} color={colors.error} />
+            <Text style={[styles.bannerText, { color: colors.error, fontWeight: '600' }]}>
+              Offers are paused for this profile. Ask an admin to use an active driver account to
+              receive deliveries.
+            </Text>
+          </View>
         )}
 
         {!isVerified && (

@@ -72,6 +72,7 @@ export interface PushRegistrationResult {
 
 let initialized = false;
 let registeredUserId: string | null = null;
+let notificationBridgeUserId: string | null = null;
 let notificationChannel: { unsubscribe: () => void } | null = null;
 let alertTimer: ReturnType<typeof setTimeout> | null = null;
 let vibrationLoop: ReturnType<typeof setInterval> | null = null;
@@ -144,15 +145,26 @@ const orderIdFromPayload = (payload: Record<string, unknown>): string | null => 
   return raw == null || raw === '' ? null : String(raw).trim();
 };
 
-const isNewOrderPayload = (payload: Record<string, unknown>): boolean => {
-  const type = String(payload.type ?? payload.event ?? '').toLowerCase();
-  const title = String(payload.title ?? '');
-  const body = String(payload.body ?? '');
-  return (
-    type.includes('new_order') ||
-    type.includes('order') ||
-    `${title} ${body}`.toLowerCase().includes('order')
-  );
+/**
+ * Only driver-facing dispatch events should ring the driver's phone. A plain
+ * `order` inbox row is the customer/store copy of a status change (the test
+ * account owns both a store and a driver profile), so treating every row that
+ * contains the word "order" as a new offer creates false alerts.
+ */
+const isDriverOfferPayload = (payload: Record<string, unknown>): boolean => {
+  const type = String(payload.type ?? payload.event ?? '').trim().toLowerCase();
+  const nested = payloadData(payload.data);
+  const event = String(nested.event ?? '').trim().toLowerCase();
+  const source = String(nested.source ?? '').trim().toLowerCase();
+  const topic = String(payload.topic ?? nested.topic ?? '').trim().toUpperCase();
+
+  if (type === 'dispatch_offer' || event === 'dispatch_offer_created') return true;
+  if (type === 'order_assigned' || event === 'dispatch_offer_accepted') return true;
+  if (source === 'create_dispatch_offer' || source === 'accept_dispatch_offer') return true;
+  // The shared broadcast is only driver-facing when it arrives on the driver
+  // topic; orders-status also writes a store-row with this same type.
+  if (type === 'order_ready_for_driver_pickup') return topic === PushTopics.driverOrdersReady;
+  return false;
 };
 
 const alertKey = (payload: Record<string, unknown>): string =>
@@ -181,7 +193,7 @@ const startAlert = (): void => {
 };
 
 const handleIncomingPayload = (payload: Record<string, unknown>): void => {
-  if (!isNewOrderPayload(payload)) return;
+  if (!isDriverOfferPayload(payload)) return;
   const key = alertKey(payload);
   if (lastAlertKey === key) return;
   lastAlertKey = key;
@@ -189,7 +201,10 @@ const handleIncomingPayload = (payload: Record<string, unknown>): void => {
 };
 
 const startNotificationBridge = (userId: string): void => {
+  if (!userId.trim()) return;
+  if (notificationBridgeUserId === userId && notificationChannel) return;
   notificationChannel?.unsubscribe();
+  notificationBridgeUserId = userId;
   let lastSeen = new Date().toISOString();
 
   const channel = SupabaseConfig.client
@@ -213,6 +228,15 @@ const startNotificationBridge = (userId: string): void => {
           body: String(row.body ?? ''),
           notificationId: String(row.id ?? ''),
         };
+        if (!isDriverOfferPayload(payload)) return;
+        // Remote pushes are already displayed by the OS. This bridge is the
+        // foreground/offline fallback for a real offer row, so show a visible
+        // notification even when no driver FCM token was ever registered.
+        void PushService.showNotification(
+          String(payload.title),
+          String(payload.body),
+          orderIdFromPayload(payload),
+        );
         handleIncomingPayload(payload);
       },
     )
@@ -300,6 +324,11 @@ export const PushService = {
     return new Set([PushTopics.driverOrdersReady, PushTopics.driver(userId)]);
   },
 
+  /** Realtime notification bridge works even when no push token is available. */
+  watchNotifications(userId: string): void {
+    startNotificationBridge(userId);
+  },
+
   async initialize(): Promise<void> {
     if (initialized || !AppConfig.featureFirebase) return;
     initialized = true;
@@ -382,6 +411,11 @@ export const PushService = {
       return { outcome: 'noSession', authorization: 'notDetermined', topics: new Set() };
     }
 
+    // Do not make the in-app offer bridge depend on push-token registration.
+    // A denied permission or missing FCM token must still allow offers that
+    // arrive while the app is in the foreground to alert and notify.
+    startNotificationBridge(userId);
+
     await PushService.initialize();
     if (registeredUserId === userId) {
       return {
@@ -425,7 +459,6 @@ export const PushService = {
       }
       registeredUserId = userId;
       const topics = await PushService.syncTopics(PushService.driverTopics(userId));
-      startNotificationBridge(userId);
 
       return {
         outcome: 'registered',
@@ -519,6 +552,7 @@ export const PushService = {
     writeTopics(new Set());
     notificationChannel?.unsubscribe();
     notificationChannel = null;
+    notificationBridgeUserId = null;
     registeredUserId = null;
   },
 

@@ -95,14 +95,29 @@ export const OrderService = {
         .in('order_id', orderIds);
       if (assignmentError) throw assignmentError;
 
-      const assignedOrderIds = new Set(
-        (Array.isArray(assignments) ? assignments : [])
-          .filter((row) => (row as Record<string, unknown>).driver_id != null)
-          .map((row) => (row as Record<string, unknown>).order_id as string | null)
-          .filter((id): id is string => typeof id === 'string'),
-      );
+      // Only a LIVE assignment hides an order. Expired/declined rows are
+      // dispatch history: leaving them visible is what lets a driver reclaim
+      // an order after their 30-second offer lapses.
+      const activeAssignedOrderIds = new Set<string>();
+      const offeredToMe = new Set<string>();
+      const currentDriverId = SupabaseConfig.currentUserId;
+      for (const row of Array.isArray(assignments) ? assignments : []) {
+        const item = row as Record<string, unknown>;
+        const orderId = typeof item.order_id === 'string' ? item.order_id : null;
+        const driverId = typeof item.driver_id === 'string' ? item.driver_id : null;
+        if (!orderId || !driverId) continue;
 
-      return allPending.filter((order) => !assignedOrderIds.has(order.id));
+        const status = String(item.status ?? '').trim().toLowerCase();
+        const isActive = !TERMINAL_ASSIGNMENT_STATUSES.has(status);
+        if (isActive) activeAssignedOrderIds.add(orderId);
+        if (driverId === currentDriverId && status === DriverAssignmentStatus.offered) {
+          offeredToMe.add(orderId);
+        }
+      }
+
+      return allPending.filter(
+        (order) => offeredToMe.has(order.id) || !activeAssignedOrderIds.has(order.id),
+      );
     } catch (error) {
       console.debug('Error fetching available orders:', error);
       throw error;
