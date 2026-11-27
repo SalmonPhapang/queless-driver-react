@@ -97,6 +97,16 @@ const writeTopics = (topics: Set<string>): void => {
   Prefs.setString(PrefKeys.pushTopics, JSON.stringify([...topics]));
 };
 
+/**
+ * When a signed-in driver owns a saved Expo/FCM token, remote pushes already
+ * display the notification. The realtime bridge is only the fallback for Expo
+ * Go / denied-permission builds; running both produces two identical alerts.
+ */
+const hasRemotePushToken = (userId: string): boolean =>
+  AppConfig.remotePushAvailable &&
+  Prefs.getString(PrefKeys.pushRegisteredUserId) === userId &&
+  Boolean(Prefs.getString(PrefKeys.pushToken));
+
 type PermissionResponseWithIos = NotificationsTypes.PermissionResponse & {
   ios?: { status?: NotificationsTypes.IosAuthorizationStatus };
 };
@@ -218,6 +228,7 @@ const startNotificationBridge = (userId: string): void => {
         filter: `user_id=eq.${userId}`,
       },
       (changes) => {
+        if (hasRemotePushToken(userId)) return;
         const row = (changes.new ?? {}) as Record<string, unknown>;
         const createdAt = String(row.created_at ?? '');
         if (createdAt && createdAt < lastSeen) return;
@@ -316,6 +327,7 @@ const registerToken = async (
 
   Prefs.setString(PrefKeys.pushToken, token);
   Prefs.setString(PrefKeys.pushProvider, provider);
+  Prefs.setString(PrefKeys.pushRegisteredUserId, userId);
   return null;
 };
 
@@ -550,6 +562,7 @@ export const PushService = {
       }
     }
     writeTopics(new Set());
+    Prefs.remove(PrefKeys.pushRegisteredUserId);
     notificationChannel?.unsubscribe();
     notificationChannel = null;
     notificationBridgeUserId = null;
@@ -569,6 +582,7 @@ export const PushService = {
     }
     Prefs.remove(PrefKeys.pushToken);
     Prefs.remove(PrefKeys.pushProvider);
+    Prefs.remove(PrefKeys.pushRegisteredUserId);
     registeredUserId = null;
   },
 

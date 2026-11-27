@@ -54,6 +54,7 @@ export const PrefKeys = {
   driverDeviceId: 'driver_device_id',
   pushToken: 'queless_push_token',
   pushProvider: 'queless_push_provider',
+  pushRegisteredUserId: 'queless_push_registered_user_id',
   pushTopics: 'queless_push_topics',
   batteryExempted: 'battery_optimisation_exempted',
   locationDriverId: 'location_driver_id',
