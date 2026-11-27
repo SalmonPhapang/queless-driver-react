@@ -313,7 +313,9 @@ export const PushService = {
           name: 'New Orders',
           description: 'Notifications when a new order is offered or assigned',
           importance: notifications.AndroidImportance.MAX,
-          sound: 'default',
+          // Do not pass a string here on Android: expo-notifications treats it as a
+          // custom raw resource filename and logs an error when it is not bundled.
+          // Omitting `sound` uses the system default notification sound.
           vibrationPattern: [0, 400, 200, 400, 200, 400],
           lightColor: '#D13540',
         }),
