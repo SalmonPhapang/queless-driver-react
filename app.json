@@ -4,9 +4,12 @@
     "slug": "queless-driver",
     "version": "1.0.1",
     "orientation": "portrait",
-    "platforms": ["ios", "android"],
+    "platforms": [
+      "ios",
+      "android"
+    ],
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "system",
+    "userInterfaceStyle": "automatic",
     "scheme": "com.queless.driver",
     "splash": {
       "image": "./assets/splash-icon.png",
@@ -32,7 +35,9 @@
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_LOCATION",
         "android.permission.CAMERA",
-        "android.permission.RECORD_AUDIO"
+        "android.permission.RECORD_AUDIO",
+        "android.permission.ACCESS_BACKGROUND_LOCATION",
+        "android.permission.RECEIVE_BOOT_COMPLETED"
       ],
       "predictiveBackGestureEnabled": false
     },
@@ -100,6 +105,12 @@
         "projectId": "6150ba97-2eec-4dca-a848-35880ba12523"
       }
     },
-    "owner": "salmonphapangs-team"
+    "owner": "salmonphapangs-team",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/6150ba97-2eec-4dca-a848-35880ba12523"
+    }
   }
 }
