@@ -66,7 +66,7 @@ export const DriverService = {
    * (token row + driver topics) is the shared PushService.registerDriver.
    */
   async updateFCMToken(id: string): Promise<void> {
-    await PushService.registerDriver(id);
+    await PushService.registerDriver(id, { prompt: false });
   },
 
   async saveProfile({

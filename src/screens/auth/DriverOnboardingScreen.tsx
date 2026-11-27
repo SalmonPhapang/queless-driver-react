@@ -203,7 +203,11 @@ export const DriverOnboardingScreen = () => {
         );
       }
 
-      if (AppConfig.featureFirebase) await PushService.registerDriver(user.id);
+      // Silent registration only; the OS notification prompt belongs on the
+      // permissions screen that follows onboarding.
+      if (AppConfig.featureFirebase) {
+        await PushService.registerDriver(user.id, { prompt: false });
+      }
       await AuthService.refreshUser();
       // RootGate re-evaluates the whole gate once the profile exists.
       router.replace('/');

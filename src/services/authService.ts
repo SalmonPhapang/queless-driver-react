@@ -46,7 +46,9 @@ export const AuthService = {
           // Watch the durable inbox before any push-token work so a driver
           // with denied notifications still sees/ hears foreground offers.
           PushService.watchNotifications(user.id);
-          void PushService.registerDriver(user.id);
+          // Silent: a cold start must never trigger an out-of-context OS
+          // notification prompt. /permissions owns that question.
+          void PushService.registerDriver(user.id, { prompt: false });
         }
         // Cold start is where a lost or replaced device is caught.
         await AuthService.checkDeviceBinding();
@@ -119,7 +121,9 @@ export const AuthService = {
 
       if (AppConfig.featureFirebase) {
         PushService.watchNotifications(user.id);
-        await PushService.registerDriver(user.id);
+        // The permissions screen asks first; sign-in only arms an already
+        // authorised device so the OS prompt is never shown without context.
+        await PushService.registerDriver(user.id, { prompt: false });
       }
     }
 

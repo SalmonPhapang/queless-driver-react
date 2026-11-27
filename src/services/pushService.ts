@@ -70,6 +70,15 @@ export interface PushRegistrationResult {
   error?: unknown;
 }
 
+export interface RegisterDriverOptions {
+  /**
+   * Only PermissionRequestScreen may show the OS notification prompt. Sign-in,
+   * session restore and onboarding must register silently or they bypass the
+   * screen entirely with an out-of-context system dialog.
+   */
+  prompt?: boolean;
+}
+
 let initialized = false;
 let registeredUserId: string | null = null;
 let notificationBridgeUserId: string | null = null;
@@ -386,7 +395,7 @@ export const PushService = {
       if (AppConfig.remotePushAvailable) {
         notifications.addPushTokenListener(() => {
           const userId = registeredUserId ?? SupabaseConfig.currentUserId;
-          if (userId) void PushService.registerDriver(userId);
+          if (userId) void PushService.registerDriver(userId, { prompt: false });
         });
       }
     } catch (error) {
@@ -415,7 +424,10 @@ export const PushService = {
     return allowsPush(toAuthorization(requested));
   },
 
-  async registerDriver(userId: string): Promise<PushRegistrationResult> {
+  async registerDriver(
+    userId: string,
+    { prompt = false }: RegisterDriverOptions = {},
+  ): Promise<PushRegistrationResult> {
     if (!AppConfig.remotePushAvailable) {
       return { outcome: 'unsupported', userId, authorization: 'authorized', topics: new Set() };
     }
@@ -439,14 +451,27 @@ export const PushService = {
     }
 
     try {
-      const granted = await PushService.requestPermission();
-      if (!granted) {
-        return {
-          outcome: 'permissionDenied',
-          userId,
-          authorization: 'denied',
-          topics: new Set(),
-        };
+      let authorization = await PushService.notificationSettings();
+      if (!allowsPush(authorization)) {
+        if (!prompt) {
+          // No OS dialog: the driver will be asked on /permissions instead.
+          return {
+            outcome: 'permissionDenied',
+            userId,
+            authorization,
+            topics: new Set(),
+          };
+        }
+        const granted = await PushService.requestPermission();
+        if (!granted) {
+          return {
+            outcome: 'permissionDenied',
+            userId,
+            authorization: await PushService.notificationSettings(),
+            topics: new Set(),
+          };
+        }
+        authorization = await PushService.notificationSettings();
       }
 
       let registration = await fetchPushToken();
@@ -455,7 +480,7 @@ export const PushService = {
         registration = await fetchPushToken();
       }
       if (!registration) {
-        return { outcome: 'noToken', userId, authorization: 'authorized', topics: new Set() };
+        return { outcome: 'noToken', userId, authorization, topics: new Set() };
       }
 
       const saveError = await registerToken(userId, registration.token, registration.provider);
@@ -464,7 +489,7 @@ export const PushService = {
           outcome: 'saveFailed',
           userId,
           token: registration.token,
-          authorization: 'authorized',
+          authorization,
           topics: new Set(),
           error: saveError,
         };
@@ -476,7 +501,7 @@ export const PushService = {
         outcome: 'registered',
         userId,
         token: registration.token,
-        authorization: 'authorized',
+        authorization,
         topics,
       };
     } catch (error) {

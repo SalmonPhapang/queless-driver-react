@@ -88,8 +88,14 @@ export const PermissionRequestScreen = () => {
     value.photos &&
     (!requiresBattery || value.battery);
 
-  const proceed = () => {
+  const proceed = async (snapshot: PermissionState = state) => {
     Prefs.setBool(PrefKeys.permissionsRequested, true);
+    // This is the only screen that asks for notification access. Arm the token
+    // silently here so an already-authorised driver does not need a second
+    // prompt (or get pushed through the screen with no visible question).
+    if (AppConfig.remotePushAvailable && snapshot.notifications) {
+      await AuthService.syncFcmToken();
+    }
     // Flutter pushes RootGate here so every gate is re-evaluated.
     router.replace('/');
   };
@@ -116,7 +122,7 @@ export const PermissionRequestScreen = () => {
         setState(next);
         setLoading(false);
         // Like Flutter, skip the screen when everything is already granted.
-        if (allGranted(next)) proceed();
+        if (allGranted(next)) await proceed(next);
       } catch (error) {
         setLoading(false);
         UiService.showError(`Error checking permissions: ${errorMessage(error)}`);
@@ -158,7 +164,7 @@ export const PermissionRequestScreen = () => {
 
       const next = { ...state, [kind]: granted };
       setState(next);
-      if (allGranted(next)) proceed();
+      if (allGranted(next)) await proceed(next);
     } catch (error) {
       console.debug(`${kind} permission was not granted:`, error);
     } finally {
@@ -232,10 +238,16 @@ export const PermissionRequestScreen = () => {
             title="Continue"
             variant="primary"
             block
-            onPress={proceed}
+            onPress={() => void proceed()}
             disabled={!allGranted(state) || requesting !== null}
           />
-          <Button title="Skip for now" variant="ghost" size="sm" onPress={proceed} disabled={requesting !== null} />
+          <Button
+            title="Skip for now"
+            variant="ghost"
+            size="sm"
+            onPress={() => void proceed()}
+            disabled={requesting !== null}
+          />
         </View>
       </ScrollView>
     </Screen>
