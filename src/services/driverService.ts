@@ -15,7 +15,7 @@ export const DriverService = {
 
   async ensureDriverProfile({ authUserId }: { authUserId: string }): Promise<void> {
     // First ensure the user exists in public.users.
-    await SupabaseConfig.client.from('users').upsert(
+    const userResult = await SupabaseConfig.client.from('users').upsert(
       {
         id: authUserId,
         email: SupabaseConfig.currentUser?.email ?? '',
@@ -23,15 +23,21 @@ export const DriverService = {
       },
       { onConflict: 'id' },
     );
+    if (userResult.error) {
+      throw new Error(`Could not create user profile: ${userResult.error.message}`);
+    }
 
     // Then ensure the driver record exists.
-    await SupabaseConfig.client.from(DriverService.table).upsert(
+    const driverResult = await SupabaseConfig.client.from(DriverService.table).upsert(
       {
         user_id: authUserId,
         updated_at: new Date().toISOString(),
       },
       { onConflict: 'user_id' },
     );
+    if (driverResult.error) {
+      throw new Error(`Could not create driver profile: ${driverResult.error.message}`);
+    }
   },
 
   async getDriverProfile(id: string): Promise<Driver | null> {

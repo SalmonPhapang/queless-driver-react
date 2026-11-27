@@ -79,6 +79,7 @@ export const DriverOnboardingScreen = () => {
 
   const [addBankDetails, setAddBankDetails] = useState(false);
   const [banks, setBanks] = useState<PaystackBank[]>([]);
+  const [bankLoadError, setBankLoadError] = useState<string | null>(null);
   const [selectedBankCode, setSelectedBankCode] = useState('');
   const [accountHolder, setAccountHolder] = useState('');
   const [accountNumber, setAccountNumber] = useState('');
@@ -87,8 +88,14 @@ export const DriverOnboardingScreen = () => {
   const loadBanks = async () => {
     try {
       setBanks(await PayoutService.getBanks());
+      setBankLoadError(null);
+      setErrors((prev) => ({ ...prev, bank: undefined }));
     } catch (error) {
       console.debug('Failed to load banks:', error);
+      setBanks([]);
+      const message = `Could not load banks: ${errorMessage(error)}`;
+      setBankLoadError(message);
+      setErrors((prev) => ({ ...prev, bank: message }));
     }
   };
 
@@ -334,11 +341,21 @@ export const DriverOnboardingScreen = () => {
                 compact
                 label="Select Bank"
                 value={selectedBankCode}
-                error={errors.bank}
-                placeholder={banks.length === 0 ? 'Loading banks…' : 'Select a bank'}
+                error={bankLoadError ?? errors.bank}
+                placeholder={
+                  banks.length === 0 && !bankLoadError ? 'Loading banks…' : 'Select a bank'
+                }
                 onChange={setSelectedBankCode}
                 options={banks.map((bank) => ({ value: bank.code, label: bank.name }))}
               />
+              {bankLoadError ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  title="Retry banks"
+                  onPress={() => void loadBanks()}
+                />
+              ) : null}
               <Input
                 compact
                 label="Account Holder Name"
