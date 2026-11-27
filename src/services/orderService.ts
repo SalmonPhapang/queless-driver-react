@@ -44,6 +44,22 @@ const toOrders = (rows: unknown): DeliveryOrder[] =>
 
 const nowIso = (): string => new Date().toISOString();
 
+/** Fire-and-forget breadcrumbs for the accept flow; never blocks the claim. */
+const logAcceptEvent = (step: string, success: boolean, error?: unknown): void => {
+  void SupabaseConfig.client
+    .from('edge_call_events')
+    .insert({
+      app: 'driver',
+      function_name: `acceptOrder.${step}`,
+      success,
+      error: error == null ? null : errorMessage(error),
+      user_id: SupabaseConfig.currentUserId,
+    })
+    .then(({ error: telemetryError }) => {
+      if (telemetryError) console.debug('[accept] Telemetry write failed:', telemetryError);
+    });
+};
+
 export interface DriverPosition {
   latitude: number;
   longitude: number;
@@ -214,6 +230,7 @@ export const OrderService = {
     customerId: string;
   }): Promise<void> {
     console.debug('=== acceptOrder START ===', { orderId, driverId, customerId });
+    logAcceptEvent('start', true);
     PushService.stopNewOrderAlert();
 
     try {
@@ -225,6 +242,7 @@ export const OrderService = {
       //    expired through a narrow RPC so the direct claim below is not blocked
       //    by orders-status. The 30-second acceptance rule is never bypassed.
       const existingOffer = await OrderService.findOfferForDriver({ orderId, driverId });
+      logAcceptEvent('offer_check', true);
       if (existingOffer) {
         if (existingOffer.offerExpiresAt == null) {
           // Legacy offer without a deadline: the server derives one from
@@ -237,6 +255,7 @@ export const OrderService = {
           } catch (error) {
             if (!OrderService.isExpiredOfferError(error)) throw error;
             await OrderService.expireDispatchOffer(existingOffer.id);
+            logAcceptEvent('offer_expired', true);
           }
         }
       }
@@ -282,6 +301,7 @@ export const OrderService = {
           });
         if (insertError) throw insertError;
       }
+      logAcceptEvent('assignment_ready', true);
 
       // 3. Update order status via the shared edge function.
       await OrderService.invokeOrdersStatus({
@@ -290,7 +310,9 @@ export const OrderService = {
         driverId,
         message: 'Driver assigned and heading to store',
       });
+      logAcceptEvent('completed', true);
     } catch (error) {
+      logAcceptEvent('failed', false, error);
       console.debug('ERROR in acceptOrder:', error);
       throw error;
     }

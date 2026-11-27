@@ -16,7 +16,9 @@ import type { Driver } from '../../models/driver';
 import { OrderStatusX } from '../../models/statuses';
 import { DriverService } from '../../services/driverService';
 import { LOCATION_SETTINGS_HELP, LocationService } from '../../services/locationService';
+import { NotificationInboxService } from '../../services/notificationInboxService';
 import { OrderService } from '../../services/orderService';
+import { UiService } from '../../services/uiService';
 import { useAuthStore } from '../../stores/authStore';
 import { useTheme } from '../../theme/ThemeContext';
 import { typography } from '../../theme/typography';
@@ -96,6 +98,8 @@ export const AvailableTab = () => {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [driver, setDriver] = useState<Driver | null>(null);
+  const [acceptingOrderId, setAcceptingOrderId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   // null = unknown (checking). The banner must never flash while the passive
   // permission probe is still in flight.
   const [hasLocationPermission, setHasLocationPermission] = useState<boolean | null>(null);
@@ -174,6 +178,26 @@ export const AvailableTab = () => {
     }
   };
 
+  const acceptOrder = async (order: DeliveryOrder) => {
+    if (!user || acceptingOrderId) return;
+    setActionError(null);
+    setAcceptingOrderId(order.id);
+    try {
+      await OrderService.acceptOrder({
+        orderId: order.id,
+        driverId: user.id,
+        customerId: order.userId ?? '',
+      });
+      await NotificationInboxService.markOrderOffersRead(order.id);
+      await UiService.showSuccess('Order accepted. It is now in your Active list.');
+      router.replace('/home/active');
+    } catch (error) {
+      setActionError(`Failed to accept order: ${errorMessage(error)}`);
+    } finally {
+      setAcceptingOrderId(null);
+    }
+  };
+
   const isVerified = driver?.isVerified ?? false;
   const isOnline = driver?.driverStatus === 'online';
   const statusColor = OrderStatusX.color('ready_for_pickup');
@@ -243,6 +267,17 @@ export const AvailableTab = () => {
             message={loadError}
             onRetry={() => void load()}
           />
+        )}
+
+        {actionError && (
+          <View style={styles.statusBlock}>
+            <StatusMessage
+              variant="error"
+              title="Could not accept order"
+              message={actionError}
+              onDismiss={() => setActionError(null)}
+            />
+          </View>
         )}
 
         {hasLocationPermission === false && (
@@ -331,10 +366,11 @@ export const AvailableTab = () => {
                   <Button
                     variant="primary"
                     block
-                    disabled={!isVerified}
+                    loading={acceptingOrderId === order.id}
+                    disabled={!isVerified || acceptingOrderId != null}
                     style={{ backgroundColor: statusColor, minHeight: 50 }}
-                    title="ACCEPT ORDER"
-                    onPress={() => router.push(`/home/orders/${order.id}`)}
+                    title={acceptingOrderId === order.id ? 'ACCEPTING...' : 'ACCEPT ORDER'}
+                    onPress={() => void acceptOrder(order)}
                   />
                 </View>
               </OrderCard>
