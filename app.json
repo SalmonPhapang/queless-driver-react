@@ -19,6 +19,7 @@
     },
     "android": {
       "package": "com.queless.driver",
+      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "backgroundColor": "#1E1F23",
         "foregroundImage": "./assets/android-icon-foreground.png"

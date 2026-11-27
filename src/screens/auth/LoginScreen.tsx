@@ -1,6 +1,7 @@
 import { useState } from 'react';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { router } from 'expo-router';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { AppBar } from '../../components/AppBar';
 import { Button } from '../../components/Button';
 import { requestDeviceChallenge } from '../../components/DeviceVerificationModal';
@@ -23,6 +24,7 @@ export const LoginScreen = () => {
   const { colors } = useTheme();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
 
   // The challenge is forced (no Cancel / backdrop / hardware-back dismissal)
@@ -90,12 +92,26 @@ export const LoginScreen = () => {
           />
           <Input
             label="Password"
-            secureTextEntry
+            secureTextEntry={!showPassword}
             autoComplete="current-password"
             placeholder="Enter your password"
             value={password}
             onChangeText={setPassword}
             onSubmitEditing={() => void login()}
+            rightAdornment={
+              <Pressable
+                onPress={() => setShowPassword((visible) => !visible)}
+                accessibilityRole="button"
+                accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
+                hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
+              >
+                <MaterialCommunityIcons
+                  name={showPassword ? 'eye-off-outline' : 'eye-outline'}
+                  size={22}
+                  color={colors.textMuted}
+                />
+              </Pressable>
+            }
           />
         </View>
 
