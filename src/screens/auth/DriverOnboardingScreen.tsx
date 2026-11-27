@@ -172,6 +172,14 @@ export const DriverOnboardingScreen = () => {
 
     setLoading(true);
     try {
+      // RootGate decides whether onboarding is complete from the driver row.
+      // Write the shared users row first: if that fails, the driver row stays
+      // incomplete so the driver is sent back here to retry the whole profile.
+      await AuthService.updateUserProfile({
+        fullName: fullName.trim(),
+        phone: normalisedPhone,
+      });
+
       let imageUrl: string | undefined;
       if (imageUri) imageUrl = await DriverService.uploadProfileImage(user.id, imageUri);
 

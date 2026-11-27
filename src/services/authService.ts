@@ -159,6 +159,40 @@ export const AuthService = {
     }
   },
 
+  /**
+   * Driver onboarding collects the identity fields after signup. Keep the
+   * shared `users` row (and auth metadata) in step with the driver profile so
+   * the account is not left with an email but no name or phone.
+   */
+  async updateUserProfile({
+    fullName,
+    phone,
+  }: {
+    fullName: string;
+    phone: string;
+  }): Promise<void> {
+    const user = AuthService.currentUser;
+    if (!user) throw new Error('No signed-in driver to update');
+
+    const cleanName = fullName.trim();
+    const { error } = await SupabaseConfig.client
+      .from('users')
+      .update({
+        full_name: cleanName,
+        phone,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', user.id);
+    if (error) throw error;
+
+    // Other clients fall back to auth metadata when the users row is missing.
+    // A metadata failure must not undo the durable profile write above.
+    const { error: metadataError } = await SupabaseConfig.auth.updateUser({
+      data: { full_name: cleanName, phone },
+    });
+    if (metadataError) console.debug('[auth] Could not sync profile metadata:', metadataError);
+  },
+
   async signOut(): Promise<void> {
     const id = SupabaseConfig.currentUserId;
     // A manual sign-out is not a device problem: drop any stale notice.
