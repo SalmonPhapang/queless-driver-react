@@ -219,16 +219,26 @@ export const OrderService = {
     try {
       const newStatus: OrderStatus = 'driver_assigned';
 
-      // 1. If this order was OFFERED to this driver, the assignment row
-      //    already exists and is addressed to them. Accept it through the RPC,
-      //    the only path that cannot hand one order to two drivers.
-      const openOffer = await OrderService.findOpenOffer({ orderId, driverId });
-      if (openOffer) {
-        // The RPC is the server-authoritative expiry check and now also owns
-        // the order status/customer notification. Never set the order status
-        // before it, or an expired offer could still flip the order.
-        await OrderService.acceptDispatchOffer(openOffer.id);
-        return;
+      // 1. If this order was OFFERED to this driver, the assignment row already
+      //    exists. A live offer is accepted through the RPC (the only path that
+      //    cannot hand one order to two drivers). A past-deadline offer is first
+      //    expired through a narrow RPC so the direct claim below is not blocked
+      //    by orders-status. The 30-second acceptance rule is never bypassed.
+      const existingOffer = await OrderService.findOfferForDriver({ orderId, driverId });
+      if (existingOffer) {
+        if (existingOffer.offerExpiresAt == null) {
+          // Legacy offer without a deadline: the server derives one from
+          // created_at and refuses to expire it while it is still live.
+          await OrderService.expireDispatchOffer(existingOffer.id);
+        } else {
+          try {
+            await OrderService.acceptDispatchOffer(existingOffer.id);
+            return;
+          } catch (error) {
+            if (!OrderService.isExpiredOfferError(error)) throw error;
+            await OrderService.expireDispatchOffer(existingOffer.id);
+          }
+        }
       }
 
       // 2. Otherwise this is a direct claim on an order nobody holds. The
@@ -286,8 +296,8 @@ export const OrderService = {
     }
   },
 
-  /** The open dispatch offer for [orderId] addressed to [driverId], if any. */
-  async findOpenOffer({
+  /** Any still-`offered` row for this driver, including one past its deadline. */
+  async findOfferForDriver({
     orderId,
     driverId,
   }: {
@@ -304,9 +314,19 @@ export const OrderService = {
 
     const list = Array.isArray(data) ? data : [];
     if (list.length === 0) return null;
+    return DriverAssignment.fromJson(list[0] as Record<string, unknown>);
+  },
 
-    const model = DriverAssignment.fromJson(list[0] as Record<string, unknown>);
-    return DriverAssignment.canRespondToOffer(model) ? model : null;
+  /** The live dispatch offer shown by the countdown UI, if any. */
+  async findOpenOffer({
+    orderId,
+    driverId,
+  }: {
+    orderId: string;
+    driverId: string;
+  }): Promise<DriverAssignmentModel | null> {
+    const offer = await OrderService.findOfferForDriver({ orderId, driverId });
+    return offer && DriverAssignment.canRespondToOffer(offer) ? offer : null;
   },
 
   /** Accept a dispatch offer (server-authoritative RPC). */
@@ -315,6 +335,25 @@ export const OrderService = {
       p_assignment_id: assignmentId,
     });
     if (error) throw error;
+  },
+
+  /**
+   * Expire only this driver's own past-deadline offer. The server re-checks the
+   * deadline, order status and competing assignments; this never runs the
+   * global timeout sweep and never accepts an expired offer late.
+   */
+  async expireDispatchOffer(assignmentId: string): Promise<void> {
+    const { error } = await SupabaseConfig.client.rpc('expire_dispatch_offer', {
+      p_assignment_id: assignmentId,
+    });
+    if (error) throw error;
+  },
+
+  /** True when accept_dispatch_offer refused a genuinely lapsed offer. */
+  isExpiredOfferError(error: unknown): boolean {
+    const code = (error as { code?: string } | null)?.code;
+    const message = String((error as { message?: unknown } | null)?.message ?? '').toLowerCase();
+    return code === '22023' && message.includes('expired');
   },
 
   /** Decline a dispatch offer so the dispatcher can offer it to someone else. */
